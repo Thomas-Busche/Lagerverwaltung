@@ -499,7 +499,10 @@ export class PurchasingService {
 
       const allReceived = order.lines.every((line) => line.receivedQuantity >= line.quantity);
       if (allReceived) {
-        order.status = "RECEIVED";
+        // Direkt archivieren statt nur "Eingegangen" zu setzen - der manuelle
+        // Zwischenschritt wurde als reine Zusatzarbeit empfunden (User-Feedback
+        // 16.09.2026), ohne dass ein fachlicher Grund dagegen sprach.
+        order.status = "ARCHIVED";
         order.receivedAt = new Date();
         if (!order.orderedAt) order.orderedAt = new Date();
       } else {
@@ -1181,7 +1184,9 @@ export class PurchasingService {
 
     try {
       const page = await browser.newPage();
-      await page.setContent(fullHtml, { waitUntil: "networkidle0" });
+      // Newer Puppeteer only supports "load"/"domcontentloaded" for setContent();
+      // "load" ensures embedded images/fonts are ready before PDF rendering.
+      await page.setContent(fullHtml, { waitUntil: "load" });
       const pdfBuffer = await page.pdf({
         format: "A4",
         printBackground: true,

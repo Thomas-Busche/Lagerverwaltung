@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 
 import { User } from '../../users/entities/user.entity';
 import { BranchConfig } from '../entities/branch-config.entity';
@@ -150,11 +150,18 @@ export class LoggingService {
       .offset(offset);
 
     // Filter anwenden
+    // Bugfix: vorher wurde der Datumsfilter nur angewendet, wenn BEIDE Werte
+    // gesetzt waren - ein alleiniges "Von"-Datum (offenes Ende) wurde still
+    // ignoriert (Vorfall 21.09.2026, im Zuge der Archiv-Suche entdeckt).
     if (filters.startDate && filters.endDate) {
       queryBuilder.andWhere('log.createdAt BETWEEN :startDate AND :endDate', {
         startDate: filters.startDate,
         endDate: filters.endDate,
       });
+    } else if (filters.startDate) {
+      queryBuilder.andWhere('log.createdAt >= :startDate', { startDate: filters.startDate });
+    } else if (filters.endDate) {
+      queryBuilder.andWhere('log.createdAt <= :endDate', { endDate: filters.endDate });
     }
 
     if (filters.userId) {
@@ -170,7 +177,20 @@ export class LoggingService {
     }
 
     if (filters.action) {
-      queryBuilder.andWhere('log.action LIKE :action', { action: `%${filters.action}%` });
+      // Freitextsuche: nicht nur die interne Aktions-Kennung (z.B.
+      // "STOCK_MOVEMENT"), sondern auch den Beschreibungstext und
+      // Artikelcode/-bezeichnung aus den Metadaten - Nutzer erwarten
+      // erwartungsgemaess, dass z.B. eine Artikelnummer hier auffindbar ist
+      // (Vorfall 21.09.2026: Suche fand Artikelnummern bislang nicht).
+      const term = `%${filters.action}%`;
+      queryBuilder.andWhere(
+        new Brackets((qb) => {
+          qb.where('log.action LIKE :term', { term })
+            .orWhere('log.details LIKE :term', { term })
+            .orWhere("JSON_UNQUOTE(JSON_EXTRACT(log.metadata, '$.itemCode')) LIKE :term", { term })
+            .orWhere("JSON_UNQUOTE(JSON_EXTRACT(log.metadata, '$.itemDescription')) LIKE :term", { term });
+        }),
+      );
     }
 
     // Niederlassungs-Filter: nur Logs von Usern dieser Niederlassung (branchId null = Super-Admin, sieht alles)
@@ -253,22 +273,35 @@ export class LoggingService {
    * Holt die Archiv-Aufbewahrungsdauer (wie lange archivierte Logs vorgehalten werden, bevor sie gelöscht werden)
    */
   async getArchiveRetentionDays(): Promise<number> {
+    // Default und Fallback muessen dem GoBD-Minimum entsprechen (siehe
+    // setArchiveRetentionDays) - sonst zeigt die UI z.B. "365 Tage" an,
+    // obwohl LogArchiveService.cleanupOldArchives() ohnehin nie vor 3650
+    // Tagen loescht (Vorfall 18.09.2026: angezeigter Wert stimmte nicht
+    // mit dem tatsaechlichen Verhalten ueberein).
+    const GOBD_MIN_RETENTION_DAYS = 3650;
     try {
       const config = await this.configRepository.findOne({ where: { key: 'log.archiveRetentionDays' } });
       if (config && config.value) {
         const days = parseInt(config.value, 10);
-        return isNaN(days) ? 365 : days;
+        return isNaN(days) ? GOBD_MIN_RETENTION_DAYS : days;
       }
     } catch {}
-    return 365; // Default: 1 Jahr
+    return GOBD_MIN_RETENTION_DAYS;
   }
 
   /**
    * Setzt die Archiv-Aufbewahrungsdauer
    */
   async setArchiveRetentionDays(days: number): Promise<void> {
-    if (days < 1 || days > 36500) { // Max 100 Jahre
-      throw new Error('Archiv-Aufbewahrungsdauer muss zwischen 1 und 36500 Tagen liegen');
+    // GoBD §147 AO: Mindest-Aufbewahrungsfrist 10 Jahre. LogArchiveService.
+    // cleanupOldArchives() erzwingt dieses Minimum ohnehin serverseitig -
+    // ein hier akzeptierter, kleinerer Wert wuerde also nie wirken, obwohl
+    // er als "gespeichert" bestaetigt wird (siehe Vorfall 18.09.2026:
+    // Aenderung auf der Archiv-Verwaltung-Seite hatte sichtbar keine
+    // Wirkung). Deshalb hier schon ablehnen statt still zu ignorieren.
+    const MIN_RETENTION_DAYS = 3650;
+    if (days < MIN_RETENTION_DAYS || days > 36500) {
+      throw new Error(`Archiv-Aufbewahrungsdauer muss zwischen ${MIN_RETENTION_DAYS} (10 Jahre, GoBD-Minimum) und 36500 Tagen liegen`);
     }
     await this.setConfig('log.archiveRetentionDays', days.toString(), 'Anzahl der Tage, die archivierte Logs vorgehalten werden');
   }

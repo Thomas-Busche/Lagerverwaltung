@@ -1,6 +1,6 @@
 # KFZ Lagerverwaltung – Benutzerhandbuch
 
-**Version 4.4 · Stand: September 2026**
+**Version 4.8 · Stand: Oktober 2026**
 
 ---
 
@@ -138,7 +138,15 @@ App erreichbar unter: `https://localhost:8443`
    Das Skript baut neue Images, führt Datenbankmigrationen aus und startet die Container neu. Vor jeder Migration wird **automatisch ein Backup** erstellt.
 
 Alternativ kann das Update direkt über die Web-Oberfläche ausgelöst werden:  
-**Administration → Wartung & Update → System aktualisieren**
+**Administration → Wartung & Update → System aktualisieren** (nur für Super-Admins, ab v4.8)
+
+> **Wichtig ab v4.8:** `docker-compose.main.yml` und `deploy/caddy/Caddyfile.main` gehören zusammen und müssen **immer gemeinsam** auf die NAS kopiert werden, nie nur eine der beiden Dateien.
+>
+> **Neu in v4.8:**
+> - Der MySQL-Port 3306 wird nicht mehr auf dem NAS-Host veröffentlicht (Zugriff nur noch innerhalb des Docker-Netzes bzw. per `docker exec`).
+> - phpMyAdmin startet nicht mehr automatisch. Bei Bedarf: `sudo docker compose -f docker-compose.main.yml --profile admin up -d phpmyadmin`, danach wieder stoppen.
+> - Schlägt eine Datenbankmigration beim Start fehl, bricht der Start jetzt ab (statt mit halber Migration weiterzulaufen). Notfall-Ausnahme: Umgebungsvariable `ALLOW_START_ON_MIGRATION_FAILURE=true`.
+> - Steht ein weiterer Proxy vor Caddy, muss `TRUST_PROXY_HOPS` entsprechend gesetzt werden (Standard: 1).
 
 ---
 
@@ -149,7 +157,8 @@ Alternativ kann das Update direkt über die Web-Oberfläche ausgelöst werden:
 | `caddy` | Reverse-Proxy, HTTPS-Termination | 80 / 443 |
 | `backend` | NestJS API | 3000 |
 | `frontend` | React App (nginx) | 80 |
-| `mysql` | Datenbank | 3306 |
+| `mysql` | Datenbank (nur intern erreichbar, seit v4.8 nicht mehr am Host veröffentlicht) | 3306 |
+| `phpmyadmin` | DB-Verwaltung, nur bei Bedarf (`--profile admin`, seit v4.8) | – |
 | `socket-proxy` | Docker-Socket-Proxy (ab v4.3) – begrenzt Docker-API-Zugriff für In-App-Updates | 2375 (intern) |
 
 > **Sicherheitshinweis:** Ab v4.3 kommuniziert der Backend-Container mit dem Docker-Daemon ausschließlich über den `socket-proxy`. Der direkte Socket-Mount (`/var/run/docker.sock`) wurde entfernt. Der Proxy erlaubt nur die für In-App-Updates notwendigen API-Endpunkte.
@@ -319,7 +328,9 @@ Zeigt alle Fahrzeuge mit aktuellem Bestand. Klick auf ein Fahrzeug öffnet die D
 
 ### 6.2 Mein Fahrzeug
 
-Techniker sehen hier ihren persönlichen Fahrzeugbestand. Fehlbestände können direkt als Nachbestellung gemeldet werden.
+Techniker sehen hier ihren persönlichen Fahrzeugbestand. Fehlbestände können direkt als Nachbestellung gemeldet werden. Techniker können nur ihr eigenes Fahrzeug einsehen und buchen (seit v4.8 auch serverseitig erzwungen).
+
+**Bereitgestellte Teile übernehmen („Erhalten"):** Hat das Teilelager Teile bereitgestellt, bestätigt der Techniker die Abholung im Dashboard mit **Erhalten**. Die Buchung ins Fahrzeug erfolgt genau einmal; der Button ist während der Buchung gesperrt, und ein wiederholter Klick oder Netzwerk-Retry bucht nichts doppelt (bis v4.7 konnte das den Ist-Bestand über den Soll-Wert erhöhen und die Anfrage im Teilelager offen lassen).
 
 **Bestand prüfen (Scan):** Der Modus-Umschalter oben bietet neben Ein-/Ausbuchen auch „Bestand prüfen". Scanner starten → Artikel scannen → Fahrzeugbestand wird sofort angezeigt, ohne zu buchen. Nützlich um schnell nachzusehen wie viele Stück eines Teils noch im Wagen sind.
 
@@ -472,6 +483,8 @@ Lager (Typ: WAREHOUSE)
 - Benutzer können einem oder mehreren Lagern zugewiesen werden
 - Ein Benutzer ohne Lagerzuweisung sieht alle Lager seiner Niederlassung
 - Strikte Isolation: Artikel, Bestellvorschläge und Berichte filtern nach dem zugewiesenen Lager
+- Ab v4.8 gilt die Niederlassungs-Isolation auch beim Ändern und Löschen von Lagerorten sowie bei der Wahl des übergeordneten Lagerorts: Lagerorte anderer Niederlassungen sind nicht erreichbar.
+- Super-Admins (ohne feste Niederlassung) können Lagerorte nur mit angegebener Niederlassung anlegen. Die Oberfläche bietet dafür noch keine Auswahl: Ohne Angabe erscheint jetzt eine klare Fehlermeldung statt eines Serverfehlers. Lagerorte daher bitte mit einem Niederlassungs-Konto anlegen.
 
 ---
 
@@ -496,6 +509,10 @@ Aufruf unter **Administration → Backup**.
 
 Vor jedem Datenbankupdate (Migration) wird automatisch ein Backup erstellt.
 
+Backup-Download, Wiederherstellung (vollständig, selektiv, aus Archiv), SQL-Dump und das Löschen von Backups werden seit v4.8 im Audit-Log (Kategorie SECURITY) protokolliert (Benutzer-ID, Zeitpunkt, Ergebnis).
+
+> **Hinweis:** Backups sind nicht verschlüsselt. Backup-Dateien nur auf geschützten Laufwerken ablegen.
+
 > **Sicherheitshinweis:** Passwort-Hashes werden **nicht** in das JSON-Backup exportiert. Nach einem Restore sind alle Benutzerkonten gesperrt – der Administrator muss die Passwörter über **Benutzer → Passwort zurücksetzen** für alle Benutzer neu vergeben.
 
 ### 12.2 Backup wiederherstellen
@@ -504,6 +521,8 @@ Vor jedem Datenbankupdate (Migration) wird automatisch ein Backup erstellt.
 2. Datenkategorien auswählen (granulare Wiederherstellung – jede Kategorie einzeln aktivierbar)
 3. Restore starten – vollständige Transaktion, automatischer Rollback bei Fehler
 4. **Passwörter zurücksetzen** – nach einem vollständigen Restore alle Benutzerpasswörter neu vergeben
+
+Beim Restore aus einem ZIP-Archiv gelten Größengrenzen (seit v4.8): höchstens 500 MB je Datei, 2 GB gesamt (einstellbar über `MAX_RESTORE_ARCHIVE_BYTES`) und 50.000 Einträge. Größere Archive werden abgelehnt.
 
 ---
 
@@ -515,6 +534,8 @@ Aufruf unter **Benutzer**.
 
 - Benutzername, Passwort, Rolle, Niederlassung, Fahrzeug-/Lager-Zuweisung
 - E-Mail für Benachrichtigungen
+
+**Niederlassungs-Grenzen (ab v4.8):** Ein Manager einer Niederlassung sieht und ändert nur Benutzer der **eigenen** Niederlassung. Er kann keine Benutzer in andere Niederlassungen verschieben und keine niederlassungsübergreifenden Super-Admins anlegen. Das bleibt Super-Admins vorbehalten. Wird das Passwort eines Benutzers durch einen Admin geändert, werden dessen angemeldete Sitzungen (Refresh-Tokens) beendet.
 
 ### 13.2 Rollen & Berechtigungen
 
@@ -555,6 +576,8 @@ Falls ein neues Administrator-Konto angelegt wurde und noch kein Login möglich 
 **MFA deaktivieren:**
 - Profil → **Sicherheit → MFA deaktivieren** (Passwort-Bestätigung erforderlich)
 - Nur Super-Admins können MFA anderer Benutzer deaktivieren (über Benutzerverwaltung)
+
+**Schutz vor Raten (ab v4.8):** Die Code-Eingabe ist auf wenige Versuche pro 15 Minuten begrenzt. Ein MFA-Zwischenschritt-Token (nach der Passwort-Eingabe) gilt ausschließlich für die Code-Eingabe und lässt sich nicht mehr als normale Anmeldung verwenden.
 
 ---
 

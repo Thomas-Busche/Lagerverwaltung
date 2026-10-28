@@ -8,7 +8,7 @@ jest.mock("@nestjs/passport", () => ({
 }));
 
 const makeStrategy = (findOneById: jest.Mock) =>
-  new JwtStrategy({ getOrThrow: () => "secret" } as never, { findOneById } as never);
+  new JwtStrategy({ get: () => "secret" } as never, { findOneById } as never);
 
 describe("JwtStrategy token type check", () => {
   it.each(["mfa-challenge", "mfa-setup", "refresh"])("rejects %s tokens", async (tokenType) => {

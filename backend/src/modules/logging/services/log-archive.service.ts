@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 
@@ -247,6 +248,91 @@ export class LogArchiveService {
     return all;
   }
 
+  /**
+   * Durchsucht archivierte Tage innerhalb eines Datumsbereichs nach den
+   * gleichen Kriterien wie die Live-Log-Suche (LoggingService.getLogs).
+   * Liest/entschluesselt gezielt nur die passenden Kategorie-Dateien statt
+   * ganzer Tage, damit eine eingegrenzte Suche (z.B. nur STOCK) nicht
+   * unnoetig andere Kategorien mitliest.
+   *
+   * Begrenzt auf max. 400 Tage pro Aufruf (~13 Monate), um eine einzelne
+   * Anfrage nicht über Jahre hinweg alle Archivdateien einlesen zu lassen -
+   * bei Bedarf muss der Zeitraum eingegrenzt werden.
+   */
+  searchArchive(filters: {
+    startDate: Date;
+    endDate?: Date;
+    category?: string;
+    level?: string;
+    action?: string;
+    userId?: string;
+  }): { entries: Array<Record<string, unknown>>; scannedDays: number; truncated: boolean } {
+    const MAX_DAYS = 400;
+    const start = new Date(filters.startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = filters.endDate ? new Date(filters.endDate) : new Date();
+    end.setHours(0, 0, 0, 0);
+
+    if (!fs.existsSync(this.archiveDir)) return { entries: [], scannedDays: 0, truncated: false };
+
+    const allDateDirs = fs
+      .readdirSync(this.archiveDir)
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .filter((d) => {
+        const t = new Date(`${d}T00:00:00.000Z`).getTime();
+        return t >= start.getTime() && t <= end.getTime();
+      })
+      .sort();
+
+    const truncated = allDateDirs.length > MAX_DAYS;
+    const dateDirs = truncated ? allDateDirs.slice(-MAX_DAYS) : allDateDirs;
+
+    const results: Array<Record<string, unknown>> = [];
+    for (const dateDir of dateDirs) {
+      const datePath = path.join(this.archiveDir, dateDir);
+      const files = fs.readdirSync(datePath).filter((f) => f.endsWith('.json'));
+      for (const file of files) {
+        const category = file.replace('.json', '');
+        if (filters.category && category !== filters.category) continue;
+
+        let entries: Array<Record<string, unknown>>;
+        try {
+          entries = this.readAndParse(path.join(datePath, file)) as Array<Record<string, unknown>>;
+        } catch {
+          continue;
+        }
+
+        for (const entry of entries) {
+          if (filters.level && entry.level !== filters.level) continue;
+          if (filters.userId && entry.userId !== filters.userId) continue;
+          if (filters.action && !this.matchesFreeText(entry, filters.action)) continue;
+          results.push(entry);
+        }
+      }
+    }
+
+    results.sort((a, b) => new Date(String(b.timestamp ?? 0)).getTime() - new Date(String(a.timestamp ?? 0)).getTime());
+    return { entries: results, scannedDays: dateDirs.length, truncated };
+  }
+
+  /**
+   * Freitextsuche wie in LoggingService.getLogs(): nicht nur die interne
+   * Aktions-Kennung, sondern auch Details-Text und Artikelcode/-bezeichnung
+   * aus den Metadaten - muss mit der Live-Suche konsistent bleiben, sonst
+   * verschwinden Treffer beim Uebergang von aktiv zu archiviert.
+   */
+  private matchesFreeText(entry: Record<string, unknown>, term: string): boolean {
+    const needle = term.toLowerCase();
+    const metadata = (entry.metadata ?? {}) as Record<string, unknown>;
+    const haystacks = [
+      entry.action,
+      entry.details,
+      metadata.itemCode,
+      metadata.itemDescription,
+    ];
+    return haystacks.some((v) => typeof v === 'string' && v.toLowerCase().includes(needle));
+  }
+
   /** Delete the archive directory for a given date */
   deleteArchiveDay(date: string): void {
     this.safe(date, /^\d{4}-\d{2}-\d{2}$/);
@@ -257,10 +343,45 @@ export class LogArchiveService {
 
   /** Returns all distinct past dates (before today) that still have logs in the DB */
   async getPastDatesInDb(): Promise<string[]> {
+    // DATE_FORMAT statt DATE(): mysql2 liefert fuer DATE-Spalten/Ausdruecke
+    // JS-Date-Objekte zurueck (nicht Strings), wodurch archiveLogs()'s
+    // Regex-Validierung (erwartet "YYYY-MM-DD") fuer jedes Datum fehlschlug.
     const rows: { date: string }[] = await this.logRepo.query(
-      `SELECT DISTINCT DATE(createdAt) AS \`date\` FROM system_logs WHERE DATE(createdAt) < CURDATE() ORDER BY \`date\``,
+      `SELECT DISTINCT DATE_FORMAT(createdAt, '%Y-%m-%d') AS \`date\` FROM system_logs WHERE DATE(createdAt) < CURDATE() ORDER BY \`date\``,
     );
     return rows.map(r => r.date);
+  }
+
+  /**
+   * Verschiebt taeglich automatisch Logs, die aelter als die konfigurierte
+   * Aufbewahrungsfrist (log.retentionDays) sind, ins Archiv und raeumt
+   * abgelaufene Archive auf. Ohne diesen Job blieb archiveLogs() ein rein
+   * manueller Admin-Button, der in der Praxis nie geklickt wurde -
+   * system_logs wuchs dadurch ungebremst (Vorfall 16.09.2026: 130k Zeilen,
+   * ~75MB bei einer produktiv genutzten Installation).
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  async archiveOldLogs(): Promise<void> {
+    const retentionDays = await this.loggingService.getLogRetentionDays();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - retentionDays);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+    const pastDates = (await this.getPastDatesInDb()).filter((date) => date < cutoffStr);
+    if (pastDates.length === 0) return;
+
+    let totalArchived = 0;
+    for (const date of pastDates) {
+      const result = await this.archiveLogs(date);
+      totalArchived += Object.values(result.byCategory).reduce((sum, n) => sum + n, 0);
+    }
+
+    const archiveRetentionDays = await this.loggingService.getArchiveRetentionDays();
+    const removedOldArchiveDirs = this.cleanupOldArchives(archiveRetentionDays);
+
+    this.logger.log(
+      `Automatische Log-Archivierung: ${totalArchived} Logs aus ${pastDates.length} Tagen archiviert, ${removedOldArchiveDirs} alte Archive entfernt`,
+    );
   }
 
   /** Delete archive directories older than retentionDays. Returns count of removed dirs. */

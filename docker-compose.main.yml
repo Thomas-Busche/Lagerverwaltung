@@ -70,7 +70,7 @@ services:
           memory: 2G
 
   backend:
-    image: ghcr.io/sirbuschi2003/lagerverwaltung-backend:latest
+    image: ghcr.io/thomas-busche/lagerverwaltung-backend:latest
     build:
       context: ./backend
       target: runner
@@ -165,7 +165,7 @@ services:
       - lagerverwaltung
 
   frontend:
-    image: ghcr.io/sirbuschi2003/lagerverwaltung-frontend:latest
+    image: ghcr.io/thomas-busche/lagerverwaltung-frontend:latest
     build:
       context: ./frontend
     restart: unless-stopped

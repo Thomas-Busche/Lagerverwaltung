@@ -5,6 +5,165 @@ Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.0.0
 
 ---
 
+## [4.8.0] – 2026-10-28 · Sicherheits-Release (Re-Audit) + Fix doppelte „Erhalten"-Buchung
+
+> **Hintergrund:** Teile, die ein Techniker über das Dashboard mit „Erhalten" übernahm, blieben im Teilelager teils als „bereitgestellt" stehen, während sie beim Techniker verschwanden. Ursache: Mehrfach-Klicks buchten dieselbe Bereitstellung mehrfach ein (im Datenbestand 6 Einbuchungen binnen 24 s), der Ist-Bestand lag dadurch über dem Soll und die Anfrage blieb offen. Zusätzlich wurde ein Sicherheits-Re-Audit durchgeführt und umgesetzt.
+
+### Bugfix
+- **„Erhalten"-Buchung ist jetzt idempotent:** Die Anfrage wird beim Abholen in der Transaktion gesperrt und der Status erneut geprüft; parallele oder wiederholte Klicks buchen nichts doppelt. Der Button im Dashboard ist während der Buchung gesperrt. Regressionstest mit sechs gleichzeitigen Klicks.
+- Lagerorte anlegen als Super-Admin lieferte einen rohen Datenbankfehler (`branchId cannot be null`); jetzt eine klare Fehlermeldung (Niederlassung muss angegeben werden).
+- **Hinweis:** Bereits falsch hochgezählte Bestände (z.B. Ist über Soll) werden nicht automatisch korrigiert und müssen einmalig manuell nachgezählt bzw. korrigiert werden.
+
+### Sicherheit
+- **Anmeldung:** MFA-Zwischen-, MFA-Setup- und Refresh-Tokens werden nicht mehr als normale Zugriffstoken akzeptiert (HTTP und WebSocket). Damit ist die Umgehung von MFA über das Zwischen-Token geschlossen. MFA-Code-Eingabe hat ein strenges Rate-Limit.
+- **Benutzerverwaltung:** Manager einer Niederlassung können nur Benutzer der eigenen Niederlassung ändern oder löschen, keine Benutzer verschieben und keine Super-Admins anlegen. Passwortänderung durch einen Admin beendet die Sitzungen des Benutzers.
+- **Niederlassungs-Isolation:** Lagerorte (ändern/löschen/Eltern-Lagerort), Fahrzeuge und Fahrzeugbestands-Routen prüfen jetzt Berechtigung und Niederlassung; Techniker sehen nur ihr eigenes Fahrzeug. Fahrzeuge werden per DTO validiert (kein Mass Assignment mehr).
+- **WebSocket:** Anmeldung wird beim Verbindungsaufbau geprüft, Live-Updates gehen nur an die eigene Niederlassung, die Benutzer-ID kommt aus dem Token statt vom Client.
+- **Wartung:** `/maintenance/fix` und `/update/apply` erfordern Super-Admin.
+- **Eingaben:** DTO-Validierung für Bestellpositionen, Logging-/Archiv-Einstellungen, E-Mail-Konfiguration, MFA und Wartungs-Endpunkte. CSV-Exporte neutralisieren Excel-Formeln. HTML in Mails wird escaped, Dateinamen in Download-Headern werden bereinigt.
+- **Betrieb/NIS2:** `trust proxy` gesetzt (korrekte Client-IP für Rate-Limit und Audit-Log), globaler Fehlerfilter ohne Stacktrace-Ausgabe, fehlgeschlagene Migration stoppt den Start, Audit-Logs für Backup-Download/Restore/Löschen, Schutz vor Zip-Bomben und Pfad-Ausbruch beim Restore.
+- **Datensparsamkeit:** Benutzername nicht mehr im Klartext in Lösch-/Fehler-Logs (nur noch Benutzer-ID).
+- **Deployment:** MySQL-Port nicht mehr am Host veröffentlicht, phpMyAdmin gepinnt (5.2.3) und nur per Profil `admin`, Dev-Ports an localhost gebunden, veraltete Header (`X-XSS-Protection`, HSTS-`preload` bei selbstsigniertem Zertifikat) entfernt. `deploy/caddy/dev.key` ist nicht mehr versioniert.
+- **Abhängigkeiten:** puppeteer 25.16 (behebt zod-Lücke), sharp 0.35.5, nodemailer 10.2.1, Overrides für multer 2.5.0, qs 6.17.0, uuid 11.1.1 und follow-redirects 1.16.2; weitere Patch-/Minor-Updates im Lock. `npm audit --omit=dev`: 0 Lücken in Backend und Frontend. Major-Updates (NestJS 12, MUI 9, Vite 8, TypeScript 7, ESLint 10) bewusst nicht Teil dieses Releases.
+
+### Deployment-Hinweis
+- `docker-compose.main.yml` und `deploy/caddy/Caddyfile.main` wurden beide geändert und müssen **zusammen** auf die NAS kopiert werden.
+- Nach dem Update prüfen: Live-Update im Dashboard und Schnellbuchung (WebSocket), E-Mail-Versand, Bild-Upload, Excel-Export, Backup/Restore.
+
+---
+
+## [4.7.7] – 2026-10-28 · Keine 401-Fehlalarme mehr im Systemprotokoll
+
+> **Hintergrund:** Läuft der Zugriffstoken ab, schicken Seiten mehrere Anfragen parallel los und bekommen alle ein 401. Die App erneuert den Token automatisch und wiederholt die Anfragen, trotzdem stand jedes 401 vorher als ERROR im Protokoll (im Export vom 28.10. über 700 Einträge allein für `users/me/settings`).
+
+### Bugfix
+- 401-Antworten, die automatisch per Token-Refresh wiederholt werden, werden nicht mehr als Fehler geloggt. Geloggt wird nur, wenn eine Anfrage endgültig scheitert (inkl. fehlgeschlagenem Refresh).
+
+---
+
+## [4.7.6] – 2026-09-28 · In-App-Update: echter Fehlergrund sichtbar statt "kurz was, dann nichts"
+
+> **Hintergrund:** Beim In-App-Update schlug der Neustart-Schritt fehl, aber im Update-Log war davon nichts zu sehen – nur ganz kurz blitzte etwas auf, dann blieb das Log leer. Ursache: Der Neustart-Helfer-Container lief komplett "fire-and-forget" (`docker run -d`), seine eigene Ausgabe (die tatsächliche Fehlermeldung) wurde nie eingesammelt.
+
+### Bugfix
+- Der Helfer-Container wird jetzt nach dem Start überwacht: seine Log-Ausgabe läuft live ins Update-Log, und sein tatsächlicher Exit-Code wird ausgewertet. Schlägt er fehl (z.B. Compose-Datei nicht lesbar, Rechteproblem beim gemounteten Projektpfad), erscheint jetzt die echte Fehlermeldung statt eines leeren Logs, und der Update-Status wird korrekt auf "fehlgeschlagen" gesetzt statt optimistisch auf "läuft" zu bleiben.
+- Mechanismus lokal gegen einen absichtlich fehlschlagenden Helfer-Container verifiziert (über einen Nachbau des Produktions-Socket-Proxy mit identischen Rechten) – Exit-Code und Fehlertext kommen jetzt zuverlässig im Log an.
+
+---
+
+## [4.7.5] – 2026-09-28 · Grund für Ist-Bestand-Änderung abfragbar
+
+> **Hintergrund:** Wenn der Ist-Bestand eines Artikels manuell korrigiert wurde, war im Bewegungs-Log nur "Ist-Bestand angepasst" vermerkt – ohne nachvollziehbaren Grund (Inventur, Schaden, Fehlbuchung, ...).
+
+### Neue Funktion
+- Beim Speichern einer Ist-Bestand-Änderung in den Artikeldaten erscheint jetzt ein Popup, das nach dem Grund fragt: Auswahl aus vorgegebenen Gründen (Inventur/Nachzählung, Fehlbuchung korrigiert, Beschädigt/Ausschuss, Verlust/Diebstahl, Sonstiger Grund) plus freies Anmerkungsfeld. Beides ist optional – Speichern funktioniert auch ohne Angabe. Betrifft beide Bearbeiten-Dialoge (Artikelstammdaten-Seite und die vereinfachte Techniker-Ansicht).
+- Live verifiziert: Buchung landet mit der eingegebenen Begründung statt der bisherigen Standardnotiz im Bewegungs-Log.
+
+---
+
+## [4.7.4] – 2026-09-22 · Fehlmengen erscheinen jetzt sofort im Teilelager
+
+> **Hintergrund:** Bei 30-50 gleichzeitigen Nutzern wäre das bisherige 15-Sekunden-Polling für Flotten-/Fehlmengenübersicht spürbar Dauerlast geworden, ohne dass Fehlmengen dadurch wirklich schneller sichtbar wurden – im ungünstigsten Fall lagen bis zu 15s zwischen einer Ausbuchung durch einen Außendiensttechniker und der Anzeige beim Teilelager.
+
+### Verbesserung
+- Fehlmengen-Übersicht im Teilelager-Dashboard reagiert jetzt per WebSocket sofort (statt bis zu 15s zu warten), sobald ein Techniker Teile ausbucht und dadurch eine neue Fehlmenge entsteht – nutzt das bereits bestehende `restock:updated`-Live-Signal des Backends. Das bisherige Polling bleibt als Fallback aktiv, falls die Socket-Verbindung kurzzeitig getrennt ist.
+- Doppelte, fast zeitgleiche `GET /api/items`-Anfragen (mehrere Seiten/Effekte luden beim Start unabhängig voneinander den kompletten Artikelkatalog) werden jetzt gebündelt – ein bereits laufender Abruf wird geteilt statt dupliziert.
+
+### Bugfix
+- `PATCH /stock/vehicle/:id/target` (Zielmenge setzen) konnte mit einem 500er abbrechen, wenn für Fahrzeug+Artikel bereits ein Bestandseintrag existierte – Ursache war eine Suche nach Artikel+Fahrzeug, obwohl der eindeutige Datenbank-Index auf Artikel+Lagerort liegt; bei inkonsistenten Altdaten fand die Suche den vorhandenen Eintrag nicht und versuchte einen doppelten Insert. Suche jetzt konsistent zum tatsächlichen Index.
+
+---
+
+## [4.7.3] – 2026-09-22 · Veraltete Daten auf Büro-PCs behoben
+
+> **Hintergrund:** Auf PCs mit stabiler Büro-Netzwerkverbindung zeigte praktisch jede Seite veraltete Daten, bis man F5 oder Strg+F5 drückte. Morgens nach dem Einschalten erschien die App außerdem oft fälschlich als "offline", bis man sich nach einem Reload neu anmeldete.
+
+### Bugfix
+- **Ursache:** Der Service Worker nutzte für mehrere zentrale Endpunkte (`/api/items`, `/api/stock/*`, `/api/vehicles`, `/api/auth/profile`, `/api/inventory/sessions`) "stale-while-revalidate" – sofort die alte gecachte Antwort anzeigen, im Hintergrund neu laden. Das wurde ursprünglich für Techniker mit schlechter/keiner Mobilfunkverbindung eingeführt (verhindert wiederholtes Warten auf einen ohnehin aussichtslosen Netzwerkversuch), sorgte auf Büro-PCs mit funktionierender Verbindung aber dafür, dass jede Seite konstant den Stand von "vorletztem Aufruf" zeigte – ein spürbares Update gab es erst beim übernächsten Laden.
+- Betraf auch `/api/auth/profile`: ein über Nacht abgelaufener Login-Token lieferte trotzdem noch den (damals gültigen) gecachten Profil-Stand zurück, was den morgendlichen "sieht angemeldet aus, aber offline"-Effekt erklärt.
+- **Fix:** Auf "network-first" umgestellt – Netzwerk wird zuerst versucht (max. 3s), erst bei echtem Fehlschlag greift der Cache als Fallback. Ein Techniker ohne Route zum Server bekommt einen Verbindungsfehler i.d.R. deutlich schneller als die 3s-Grenze, der Offline-Fallback bleibt also praktisch gleich schnell wie zuvor – PCs mit funktionierender Verbindung sehen jetzt aber immer den echten aktuellen Stand ohne manuellen Reload.
+- Damit gegenstandslos gewordene `Cache-Control: no-cache`-Sonderbehandlung an drei Stellen entfernt (war ein früherer Workaround für genau dieses Problem, betraf aber nur einzelne Endpunkte statt der Ursache).
+
+---
+
+## [4.7.2] – 2026-09-21 · Log-Suche findet jetzt Artikelnummern
+
+> **Hintergrund:** Nutzer erwarteten, dass sich die Systemprotokolle-Suche z.B. nach einer Artikelnummer durchsuchen lässt (die Nummer wird in der Detailansicht schließlich prominent angezeigt). Tatsächlich durchsuchte das Suchfeld bislang nur die interne Aktions-Kennung (z.B. "STOCK_MOVEMENT"), nicht den Beschreibungstext oder die Artikeldaten.
+
+### Bugfix
+- Freitextsuche in den Systemprotokollen durchsucht jetzt zusätzlich den Beschreibungstext (`details`) sowie Artikelcode/-bezeichnung aus den Metadaten – sowohl in der Live-Tabelle als auch im Archiv (konsistent, damit beim Übergang eines Eintrags von aktiv zu archiviert keine Treffer verschwinden).
+- Nebenbei gefunden: Ein alleiniges "Von"-Datum ohne "Bis" wurde bislang beim Live-Log-Filter komplett ignoriert (nur bei beiden gesetzten Werten wirksam) – jetzt funktioniert auch ein offenes Zeitfenster.
+
+---
+
+## [4.7.1] – 2026-09-21 · Artikelbilder: Verkleinerung vor dem Upload
+
+> **Hintergrund:** Artikelbilder liessen sich weder vom Handy noch vom PC hochladen. Backend-Logs zeigten teils Erfolg, teils nichts – Verdacht fiel auf grosse Rohfotos direkt von der Handykamera (z.B. 10MB+), die bei schlechter Verbindung im Lager/Feld den Upload schon vor der serverseitigen Verkleinerung (bestehende sharp-Kompression auf 800x800) scheitern liessen.
+
+### Neue Funktion
+- Artikelbilder werden jetzt **vor dem Hochladen im Browser verkleinert** (`frontend/src/utils/imageCompression.ts`, Canvas-basiert, max. 1600px Kantenlänge, JPEG-Qualität 85%) – betrifft beide Upload-Wege (Artikel-Bearbeiten-Dialog inkl. direkter Kamera-Aufnahme auf Mobilgeräten).
+- Fehlermeldungen beim Bild-Upload zeigen jetzt den konkreten Grund an (z.B. Berechtigung, Dateiformat) statt nur "Bild konnte nicht hochgeladen werden."
+- Live verifiziert: 12,5MB-Testfoto wurde im Browser auf 0,74MB verkleinert und erfolgreich hochgeladen.
+
+---
+
+## [4.7.0] – 2026-09-18 · Log-Suche über Archiv hinweg
+
+> **Hintergrund:** Nach der automatischen Log-Archivierung (4.6.1) landen ältere Protokolle nicht mehr in der Live-Tabelle. Damit eine Suche danach nicht "leer" wirkt, sucht die bestehende Systemprotokolle-Suche jetzt transparent auch im Archiv mit.
+
+### Neue Funktion
+- **Zeitraum-Filter ("Von"/"Bis" mit Datum und Uhrzeit)** in den Systemprotokollen ergänzt (bisher nur Kategorie und Freitext).
+- Sobald ein Super-Admin ein "Von"-Datum setzt, das in die Vergangenheit reicht, durchsucht die Suche automatisch auch bereits archivierte Tage – kombiniert mit Kategorie-, Level- und Freitext-Filtern. Treffer aus dem Archiv sind mit einem "Archiv"-Chip gekennzeichnet und enthalten (DSGVO-Datensparsamkeit) keinen gespeicherten Benutzernamen, nur die Benutzer-ID.
+- Aus Performance-Gründen pro Anfrage auf max. ca. 400 gescannte Archiv-Tage begrenzt; ein Hinweis in der Filterleiste zeigt an, wenn eingegrenzt werden sollte.
+- Handbuch (Systemprotokolle) entsprechend ergänzt.
+
+### Bugfix
+- **Archiv-Aufbewahrung auf der Seite "Protokoll-Archiv" hatte keine Wirkung:** Das Eingabefeld erlaubte 1–3650 Tage und bestätigte jede Eingabe als gespeichert, aber `cleanupOldArchives()` erzwingt ohnehin ein hartes 10-Jahre-Minimum (GoBD §147 AO) – ein eingegebener kleinerer Wert (z. B. 30 Tage) wurde also nie tatsächlich angewendet, obwohl die Seite "Aktualisiert" meldete. Backend lehnt Werte unter 3650 Tagen jetzt mit klarer Fehlermeldung ab, Eingabefeld und Vorschlagswert entsprechend korrigiert. Getrennt davon bleibt die "Aktiv-Aufbewahrung (Tage bis Archiv)" auf der Systemprotokolle-Seite unverändert frei einstellbar (1–3650 Tage) – das betrifft nur, wie lange Logs in der schnellen Live-Tabelle bleiben, nicht deren endgültige Löschung.
+
+---
+
+## [4.6.1] – 2026-09-16 · Bestellungs-Archivierung & Log-Wachstum
+
+> **Hintergrund:** Zwei Vorfälle am selben Tag: manuelles Archivieren von Bestellungen wurde als unnötiger Zusatzschritt empfunden, und eine produktive `system_logs`-Tabelle war auf 130.000 Zeilen (~75MB) angewachsen, weil die vorhandene Archivierungsfunktion nie automatisch lief.
+
+### Bugfixes
+- **Bestellungen archivieren sich jetzt automatisch:** Ein vollständiger Wareneingang setzte den Status bisher auf ERHALTEN (RECEIVED), Archivieren war ein separater, manueller Klick. Springt jetzt bei vollständigem Wareneingang direkt auf ARCHIVIERT.
+- **Log-Archivierung lief nie automatisch:** Es gab bereits eine Funktion, die alte Protokolle (Standard: älter als 90 Tage) aus `system_logs` in verschlüsselte Archivdateien auslagert – aber ohne Cron-Job, nur per manuellem Super-Admin-Klick, der in der Praxis nie betätigt wurde. Neuer täglicher Job (04:00 Uhr) übernimmt das jetzt automatisch.
+- **`getPastDatesInDb()` lieferte MySQL-`DATE`-Werte als JS-`Date`-Objekte statt als `"YYYY-MM-DD"`-Strings** (mysql2-Verhalten) – dadurch scheiterte die Regex-Validierung in `archiveLogs()` für jedes Datum, wodurch auch der bereits vorhandene manuelle „Alle archivieren"-Button faktisch nie funktioniert hätte. Behoben mit `DATE_FORMAT()` statt `DATE()`.
+
+### Dokumentation
+- Handbuch (Bestellungen, Systemprotokolle) an die neue automatische Archivierung angepasst.
+
+---
+
+## [4.6.0] – 2026-09-16 · Monatlicher Dependency-Checkup
+
+> **Hintergrund:** Erster turnusmäßiger Sicherheits-Checkup: veraltete Abhängigkeiten geprüft und auf aktuelle, sichere Versionen angehoben, jeweils mit Build/Typecheck/E2E-Test bzw. Live-Test in Docker verifiziert.
+
+### Backend
+- **NestJS-Kern auf v11** angehoben (`@nestjs/common`, `@nestjs/core`, `@nestjs/platform-express`, `@nestjs/platform-socket.io`, `@nestjs/websockets`, `@nestjs/testing`, `@nestjs/cli`, `@nestjs/schematics`) sowie `@nestjs/config`, `@nestjs/jwt`, `@nestjs/mapped-types`, `@nestjs/passport`, `@nestjs/schedule`, `@nestjs/typeorm` auf die jeweils neuesten kompatiblen Versionen. v12 bewusst noch nicht verwendet: `@nestjs/throttler` unterstützt es upstream noch nicht offiziell (Peer-Dependency-Konflikt).
+- `sharp`, `nodemailer`, `adm-zip`, `pdfkit`, `puppeteer`, `class-validator`, `reflect-metadata` auf aktuelle Hauptversionen angehoben. Puppeteers `setContent()` unterstützt `waitUntil: "networkidle0"` nicht mehr (entfernt) – auf `"load"` umgestellt (betrifft Bestell- und Berichts-PDF-Erzeugung).
+- `@nestjs/jwt` v12 verlangt einen gebrandeten `ms.StringValue`-Typ für `expiresIn` statt eines einfachen `string` – an den drei betroffenen Stellen (`auth.module.ts`, `stock.module.ts`, `auth.service.ts`) entsprechend typisiert.
+- Dev-Tooling: `jest`/`ts-jest`/`@types/jest` auf v30 (CLI-Flag `--testPathPattern` → `--testPathPatterns` in `test:e2e`-Script angepasst), `rimraf` sowie diverse `@types/*`-Pakete aktualisiert.
+- **Ergebnis:** 54 → 13 offene npm-audit-Findings (verbleibend: `multer`-DoS über den v12-Sprung blockiert durch `@nestjs/throttler`, sowie `exceljs`/`uuid` über eine sehr frisch veröffentlichte TypeORM-v1-Major-Version, siehe unten).
+
+### Frontend
+- **React 19**, **React Router v7** sowie `date-fns`, `idb`, `@zxing/browser`/`@zxing/library`, `papaparse`, `react-rnd` auf aktuelle Hauptversionen angehoben.
+- **Ergebnis:** 32 → 3 offene npm-audit-Findings (verbleibend: `esbuild`/`vite`-Dev-Server-Schwachstelle, betrifft nicht den produktiven Build).
+
+### Bewusst zurückgestellt (zu frisch/riskant für einen automatisierten Checkup)
+- **TypeORM v1.x** – erst zwei Wochen alt (nach Jahren auf 0.3.x), kein Track Record für eine produktiv genutzte Datenschicht.
+- **MUI v9** (bzw. v6–v9 in Summe) – Update auf `@mui/material@latest` erzeugte 439 TypeScript-Fehler durch mehrere API-Brüche (u. a. `InputProps`, `Stack`/`Grid`-Props). Eigene, dedizierte Migration nötig.
+- **Vite v8** – nutzt intern den neuen "rolldown"-Bundler mit ungelösten Peer-Konflikten in dessen eigenem Babel-8-Zweig; zu unausgereift.
+- **Zustand v5** – geänderte Default-Vergleichslogik für Selektoren verursachte einen React-Endlos-Render-Fehler (#185) direkt beim App-Start; ohne Audit aller Store-Aufrufstellen (`useShallow`) nicht sicher migrierbar.
+- **TypeScript 7** – kompletter Compiler-Neubau, erst ganz frisch als "latest" markiert.
+- **ESLint 9/10** (Backend + Frontend) – erfordert Migration auf das neue Flat-Config-Format (`eslint.config.*`), eigener Aufwand unabhängig vom Versions-Update selbst.
+
+### Nebenbei gefunden (nicht Teil dieses Updates, separat vorgemerkt)
+- Super-Admin-Benutzer (`branchId = null`) können keine Lagerorte anlegen (`POST /api/locations` wirft HTTP 500) – vorbestehender Bug, unabhängig vom Dependency-Update.
+
+---
+
 ## [4.5.0] – 2026-09-15 · Mobile Performance & Offline-Stabilität
 
 > **Hintergrund:** Techniker im Feld arbeiten praktisch durchgehend offline (der Server ist von außen grundsätzlich nicht erreichbar). Nach ersten Performance-Fixes (v4.4.0) blieb die App auf Handys weiterhin träge bzw. hing sich teils komplett auf. Dieses Release behebt die tatsächlichen Ursachen, jeweils live gegen einen echten (gestoppten) Backend-Container bzw. mit realistischen Datenmengen nachgewiesen — nicht nur per Code-Analyse.

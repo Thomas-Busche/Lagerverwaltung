@@ -33,7 +33,7 @@ services:
       - lagerverwaltung
 
   backend:
-    image: ghcr.io/sirbuschi2003/lagerverwaltung-backend:latest
+    image: ghcr.io/thomas-busche/lagerverwaltung-backend:latest
     container_name: lagerverwaltung-api
     restart: unless-stopped
     depends_on:
@@ -82,7 +82,7 @@ services:
       - lagerverwaltung
 
   frontend:
-    image: ghcr.io/sirbuschi2003/lagerverwaltung-frontend:latest
+    image: ghcr.io/thomas-busche/lagerverwaltung-frontend:latest
     container_name: lagerverwaltung-ui
     restart: unless-stopped
     depends_on:

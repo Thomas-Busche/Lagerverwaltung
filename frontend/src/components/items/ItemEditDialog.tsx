@@ -17,6 +17,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
+import StockAdjustmentReasonDialog from "./StockAdjustmentReasonDialog";
 import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
 import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -40,6 +41,7 @@ import {
 } from "../../utils/api";
 import useAuthStore from "../../store/useAuthStore";
 import useBarcodeScanner from "../../hooks/useBarcodeScanner";
+import { compressImageFile } from "../../utils/imageCompression";
 
 // ─── Hilfsfunktionen (identisch zu ItemsPage) ────────────────────────────────
 
@@ -181,6 +183,7 @@ const ItemEditDialog: React.FC<ItemEditDialogProps> = ({ itemId, open, onClose, 
   const [imageKey, setImageKey] = useState(0); // bump to force img reload
   const [lastOrder, setLastOrder] = useState<LastOrderForItemDto | null | undefined>(undefined);
   const [vehicleQuantity, setVehicleQuantity] = useState<number | null>(null);
+  const [pendingAdjustment, setPendingAdjustment] = useState<{ locationId: string; delta: number } | null>(null);
 
   // Daten laden wenn Dialog öffnet
   useEffect(() => {
@@ -357,33 +360,42 @@ const ItemEditDialog: React.FC<ItemEditDialogProps> = ({ itemId, open, onClose, 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!itemId || !originalItem) return;
-    setSubmitting(true);
     const validationError = validate();
     if (validationError) {
       setError(validationError);
-      setSubmitting(false);
       return;
     }
     const desiredQuantity = form.currentQuantity;
     const locationId = form.storageLocationId?.trim() || originalItem.storageLocation?.id;
     const currentQuantity = originalItem.storageLocation ? (originalItem.currentQuantity ?? 0) : 0;
+    if (desiredQuantity !== undefined && locationId) {
+      const delta = desiredQuantity - currentQuantity;
+      if (delta !== 0) {
+        // Erst nach Grund fragen (optional) - performSave() uebernimmt danach.
+        setPendingAdjustment({ locationId, delta });
+        return;
+      }
+    }
+    await performSave();
+  };
+
+  const performSave = async (adjustment?: { locationId: string; delta: number }, note?: string) => {
+    if (!itemId) return;
+    setSubmitting(true);
     try {
       const payload = createPayload();
       const savedItem = await updateItem(itemId, payload);
-      if (desiredQuantity !== undefined && locationId) {
-        const delta = desiredQuantity - currentQuantity;
-        if (delta !== 0) {
-          await recordMovement({
-            itemId: savedItem.id,
-            locationId,
-            userId: user?.id ?? undefined,
-            type: delta > 0 ? "CHECKIN" : "CHECKOUT",
-            quantity: Math.abs(delta),
-            occurredAt: new Date().toISOString(),
-            note: "Ist-Bestand angepasst",
-            source: "items-adjustment",
-          });
-        }
+      if (adjustment) {
+        await recordMovement({
+          itemId: savedItem.id,
+          locationId: adjustment.locationId,
+          userId: user?.id ?? undefined,
+          type: adjustment.delta > 0 ? "CHECKIN" : "CHECKOUT",
+          quantity: Math.abs(adjustment.delta),
+          occurredAt: new Date().toISOString(),
+          note: note || "Ist-Bestand angepasst",
+          source: "items-adjustment",
+        });
       }
       onClose();
       onSaved?.();
@@ -444,11 +456,13 @@ const ItemEditDialog: React.FC<ItemEditDialogProps> = ({ itemId, open, onClose, 
                             if (!file || !itemId) return;
                             setImageUploading(true);
                             try {
-                              const updated = await uploadItemImage(itemId, file);
+                              const compressed = await compressImageFile(file);
+                              const updated = await uploadItemImage(itemId, compressed);
                               setOriginalItem(updated);
                               setImageKey((k) => k + 1);
-                            } catch {
-                              setError("Bild konnte nicht hochgeladen werden.");
+                            } catch (err: any) {
+                              console.error(err);
+                              setError(`Bild konnte nicht hochgeladen werden: ${err?.response?.data?.message || err?.message || "Unbekannt"}`);
                             } finally {
                               setImageUploading(false);
                               e.target.value = "";
@@ -475,11 +489,13 @@ const ItemEditDialog: React.FC<ItemEditDialogProps> = ({ itemId, open, onClose, 
                             if (!file || !itemId) return;
                             setImageUploading(true);
                             try {
-                              const updated = await uploadItemImage(itemId, file);
+                              const compressed = await compressImageFile(file);
+                              const updated = await uploadItemImage(itemId, compressed);
                               setOriginalItem(updated);
                               setImageKey((k) => k + 1);
-                            } catch {
-                              setError("Bild konnte nicht hochgeladen werden.");
+                            } catch (err: any) {
+                              console.error(err);
+                              setError(`Bild konnte nicht hochgeladen werden: ${err?.response?.data?.message || err?.message || "Unbekannt"}`);
                             } finally {
                               setImageUploading(false);
                               e.target.value = "";
@@ -841,6 +857,17 @@ const ItemEditDialog: React.FC<ItemEditDialogProps> = ({ itemId, open, onClose, 
           }}
         />
       )}
+
+      <StockAdjustmentReasonDialog
+        open={pendingAdjustment !== null}
+        delta={pendingAdjustment?.delta ?? 0}
+        onCancel={() => setPendingAdjustment(null)}
+        onConfirm={(note) => {
+          const adjustment = pendingAdjustment;
+          setPendingAdjustment(null);
+          if (adjustment) void performSave(adjustment, note);
+        }}
+      />
     </>
   );
 };

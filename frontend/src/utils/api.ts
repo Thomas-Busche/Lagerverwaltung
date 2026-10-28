@@ -61,18 +61,25 @@ api.interceptors.response.use(
     const config = error.config as any;
     const duration = Date.now() - (config?.metadata?.startTime || 0);
     
-    // Async logging ohne await (non-blocking)
-    logApiCall(
-      config?.method?.toUpperCase() || 'UNKNOWN',
-      config?.url || '',
-      error.response?.status || 0,
-      duration,
-      error
-    ).catch(err => console.warn('[API] Logging failed:', err));
-
     const status = error?.response?.status;
     const isAuthEndpoint = config?.url?.includes("/auth/login") || config?.url?.includes("/auth/refresh");
-    if (status === 401 && !config?._retry && !isAuthEndpoint) {
+    const willRetryAfterRefresh = status === 401 && !config?._retry && !isAuthEndpoint;
+
+    // Ein abgelaufener Access-Token (401) wird gleich per Refresh erneuert und die
+    // Anfrage wiederholt - das ist Normalbetrieb und kein Fehler fuers Systemprotokoll.
+    // Mehrere parallele Anfragen erzeugten sonst pro Token-Ablauf eine ERROR-Salve.
+    if (!willRetryAfterRefresh) {
+      // Async logging ohne await (non-blocking)
+      logApiCall(
+        config?.method?.toUpperCase() || 'UNKNOWN',
+        config?.url || '',
+        error.response?.status || 0,
+        duration,
+        error
+      ).catch(err => console.warn('[API] Logging failed:', err));
+    }
+
+    if (willRetryAfterRefresh) {
       config._retry = true;
       try {
         refreshPromise = refreshPromise || refreshAccessToken();
@@ -714,15 +721,7 @@ export const deleteUser = async (id: string): Promise<void> => {
 export const fetchVehicleStock = async (
   vehicleId: string,
 ): Promise<StockLevelDto[]> => {
-  // Cache-Control: no-cache verhindert, dass der Service Worker (stale-while-
-  // revalidate fuer /stock/vehicle/*) hier sofort eine veraltete Antwort
-  // zurueckgibt - relevant, weil dieser Endpunkt oft direkt NACH einer
-  // eigenen Buchung (z.B. "Erhalten"/"vom Lager einbuchen") erneut geladen
-  // wird und die Seite dann den frischen Bestand zeigen muss, nicht den
-  // Stand von vor der Buchung.
-  const response = await api.get<StockLevelDto[]>(`/stock/vehicle/${vehicleId}`, {
-    headers: { "Cache-Control": "no-cache" },
-  });
+  const response = await api.get<StockLevelDto[]>(`/stock/vehicle/${vehicleId}`);
   return response.data;
 };
 
@@ -742,20 +741,12 @@ export const updateVehicleTarget = async (
 export const fetchVehicleShortages = async (
   vehicleId: string,
 ): Promise<RestockRequestDto[]> => {
-  // Siehe Kommentar in fetchVehicleStock: nach einem "Erhalten"-Klick muss
-  // die Liste sofort den aktuellen Stand zeigen, nicht die Service-Worker-
-  // Cache-Antwort von vor der Buchung.
-  const response = await api.get<RestockRequestDto[]>(`/stock/vehicle/${vehicleId}/shortages`, {
-    headers: { "Cache-Control": "no-cache" },
-  });
+  const response = await api.get<RestockRequestDto[]>(`/stock/vehicle/${vehicleId}/shortages`);
   return response.data;
 };
 
 export const fetchRestockOverview = async (params?: { status?: RestockRequestStatus | "OPEN" }): Promise<RestockRequestDto[]> => {
-  const response = await api.get<RestockRequestDto[]>("/stock/shortages", {
-    params,
-    headers: { "Cache-Control": "no-cache" },
-  });
+  const response = await api.get<RestockRequestDto[]>("/stock/shortages", { params });
   return response.data;
 };
 
@@ -1484,6 +1475,8 @@ export interface LogEntry {
   ipAddress?: string;
   userAgent?: string;
   metadata?: any;
+  /** true = Eintrag stammt aus dem Archiv (aeltere, bereits ausgelagerte Logs), nicht aus der aktiven Tabelle */
+  archived?: boolean;
 }
 
 export interface LogFilters {
@@ -1501,6 +1494,9 @@ export interface LogFilters {
 export interface LogsResponse {
   logs: LogEntry[];
   total: number;
+  /** Nur gesetzt, wenn die Suche zusaetzlich das Log-Archiv durchsucht hat (siehe LogEntry.archived) */
+  archiveScannedDays?: number;
+  archiveTruncated?: boolean;
 }
 
 export const getLogs = async (filters: LogFilters = {}): Promise<LogsResponse> => {
