@@ -7,6 +7,7 @@ import sharp from "sharp";
 import { DataSource, In, IsNull, Repository } from "typeorm";
 
 
+import { escapeCsvCell } from "../../common/utils/csv.util";
 import { Location } from "../locations/entities/location.entity";
 import { LocationsService } from "../locations/locations.service";
 import { LogCategory, LogLevel } from "../logging/entities/system-log.entity";
@@ -52,11 +53,6 @@ const parseOptionalPrice = (value: unknown): string | null => {
     return null;
   }
   return parsed.toFixed(2);
-};
-
-const csvEscape = (value: unknown): string => {
-  const raw = value === undefined || value === null ? "" : String(value);
-  return `"${raw.replace(/"/g, '""')}"`;
 };
 
 /** Item mit dem zur Laufzeit berechneten, nicht persistierten Bestandsfeld `currentQuantity`. */
@@ -334,7 +330,7 @@ export class ItemsService {
       ];
     });
 
-    const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(";")).join("\n");
+    const csv = [headers, ...rows].map((row) => row.map(escapeCsvCell).join(";")).join("\n");
     return Buffer.from(`\uFEFF${csv}`, "utf8");
   }
 

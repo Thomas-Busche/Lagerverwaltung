@@ -6,6 +6,7 @@ import { PermissionsGuard } from "../access-control/guards/permissions.guard";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 
 import { CreatePurchaseOrderDto } from "./dto/create-purchase-order.dto";
+import { AddPurchaseOrderLineDto, UpdatePurchaseOrderLineDto } from "./dto/purchase-order-line.dto";
 import { ReceivePurchaseOrderDto } from "./dto/receive-purchase-order.dto";
 import { SendPurchaseOrderDto } from "./dto/send-purchase-order.dto";
 import { UpdatePurchaseOrderDto } from "./dto/update-purchase-order.dto";
@@ -130,13 +131,13 @@ export class PurchasingController {
 
   @Post(":id/lines")
   @Permissions("orders.edit")
-  addLine(@Req() req: Request, @Param("id") id: string, @Body() body: { itemId: string; quantity: number }) {
+  addLine(@Req() req: Request, @Param("id") id: string, @Body() body: AddPurchaseOrderLineDto) {
     return this.purchasingService.addLine(id, body, req.user?.branchId);
   }
 
   @Patch(":id/lines/:lineId")
   @Permissions("orders.edit")
-  updateLine(@Req() req: Request, @Param("id") id: string, @Param("lineId") lineId: string, @Body() body: { quantity: number }) {
+  updateLine(@Req() req: Request, @Param("id") id: string, @Param("lineId") lineId: string, @Body() body: UpdatePurchaseOrderLineDto) {
     return this.purchasingService.updateLine(id, lineId, body, req.user?.branchId);
   }
 

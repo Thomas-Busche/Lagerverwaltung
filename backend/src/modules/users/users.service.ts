@@ -86,7 +86,14 @@ export class UsersService {
     if (dto.role !== undefined) entity.role = dto.role;
     if (dto.vehicleId !== undefined) entity.vehicleId = dto.vehicleId ?? null;
     if (dto.branchId !== undefined) entity.branchId = dto.branchId ?? null;
-    if (dto.password) entity.passwordHash = await bcrypt.hash(dto.password, 12);
+    if (dto.password) {
+      entity.passwordHash = await bcrypt.hash(dto.password, 12);
+      // Password set by an admin: end all existing sessions of the target user
+      await this.refreshTokenRepository.update(
+        { userId: id, isRevoked: false },
+        { isRevoked: true, revokedAt: new Date() },
+      );
+    }
 
     if (dto.locationIds !== undefined) {
       entity.locations = dto.locationIds.length

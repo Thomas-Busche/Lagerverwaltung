@@ -6,6 +6,12 @@ import { InjectRepository } from "@nestjs/typeorm";
 import AdmZip from "adm-zip";
 import { Repository, DataSource, DeepPartial } from "typeorm";
 
+import {
+  assertArchiveWithinLimits,
+  MAX_DATA_JSON_BYTES,
+  resolveInsideDir,
+  resolveMaxArchiveTotalBytes,
+} from "../../common/utils/archive-limits.util";
 import { Permission } from "../access-control/entities/permission.entity";
 import { RolePermission } from "../access-control/entities/role-permission.entity";
 import { Role } from "../access-control/entities/role.entity";
@@ -1071,8 +1077,15 @@ export class SetupService implements OnModuleInit {
   async restoreFromArchive(buffer: Buffer): Promise<void> {
     const zip = new AdmZip(buffer);
 
+    // Check declared sizes from the ZIP headers before decompressing anything (zip-bomb guard).
+    assertArchiveWithinLimits(
+      zip.getEntries().map((e) => ({ entryName: e.entryName, isDirectory: e.isDirectory, size: e.header.size })),
+      resolveMaxArchiveTotalBytes(process.env.MAX_RESTORE_ARCHIVE_BYTES),
+    );
+
     const dataEntry = zip.getEntry('data.json');
     if (!dataEntry) throw new Error('data.json nicht im Archiv gefunden');
+    if (dataEntry.header.size > MAX_DATA_JSON_BYTES) throw new Error('data.json ist zu groß');
     const backup = JSON.parse(dataEntry.getData().toString('utf8')) as BackupPayload;
     await this.restoreBackup(backup);
 
@@ -1304,9 +1317,11 @@ export class SetupService implements OnModuleInit {
     const storageDir = this.getPurchaseOrderStoragePath();
     for (const pdf of pdfs) {
       try {
-        const normalized = path.normalize(pdf.relativePath);
-        if (normalized.startsWith('..') || path.isAbsolute(normalized)) continue;
-        const fullPath = path.join(storageDir, normalized);
+        const fullPath = resolveInsideDir(storageDir, String(pdf.relativePath));
+        if (!fullPath) {
+          this.logger.warn('Backup-PDF mit unzulässigem Pfad übersprungen');
+          continue;
+        }
         await fs.promises.mkdir(path.dirname(fullPath), { recursive: true });
         await fs.promises.writeFile(fullPath, Buffer.from(pdf.data, 'base64'));
       } catch { /* skip individual failures */ }

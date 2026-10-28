@@ -47,5 +47,8 @@
     "vite-plugin-pwa": "^0.20.0",
     "workbox-precaching": "^7.0.0",
     "workbox-window": "^7.4.0"
+  },
+  "overrides": {
+    "follow-redirects": "1.16.2"
   }
 }

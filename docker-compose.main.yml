@@ -52,8 +52,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    ports:
-      - "127.0.0.1:3306:3306"
+    # Kein Host-Port: Backend/phpMyAdmin erreichen MySQL im Docker-Netz, Backups laufen per "docker exec".
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -150,8 +149,10 @@ services:
 
   # Nur intern erreichbar (kein "ports:"-Mapping) - Zugriff ausschliesslich
   # ueber Caddy mit Basic-Auth, siehe deploy/caddy/Caddyfile.main
+  # Startet nur auf Anforderung: docker compose -f docker-compose.main.yml --profile admin up -d phpmyadmin
   phpmyadmin:
-    image: phpmyadmin:latest
+    image: phpmyadmin:5.2.3
+    profiles: ["admin"]
     restart: unless-stopped
     depends_on:
       mysql:

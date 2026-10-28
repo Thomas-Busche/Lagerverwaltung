@@ -5,6 +5,8 @@ import type PDFKit from "pdfkit";
 import puppeteer from 'puppeteer';
 import QRCode from "qrcode";
 
+import { escapeCsvCell } from "../../common/utils/csv.util";
+import { escapeHtml } from "../../common/utils/html.util";
 import { InventorySession } from "../inventory/entities/inventory-session.entity";
 import { groupInventoryLines } from "../inventory/utils/group-inventory-lines";
 import { Item } from "../items/entities/item.entity";
@@ -32,7 +34,7 @@ export class ExportService {
     ]);
 
     const csvContent = [headers, ...rows]
-      .map(row => row.map(field => `"${field.toString().replace(/"/g, '""')}"`).join(';'))
+      .map(row => row.map(escapeCsvCell).join(';'))
       .join('\n');
 
     return Buffer.from('\ufeff' + csvContent, 'utf8'); // UTF-8 BOM for Excel compatibility
@@ -53,7 +55,7 @@ export class ExportService {
     ]);
 
     const csvContent = [headers, ...rows]
-      .map(row => row.map(field => `"${field.toString().replace(/"/g, '""')}"`).join(';'))
+      .map(row => row.map(escapeCsvCell).join(';'))
       .join('\n');
 
     return Buffer.from('\ufeff' + csvContent, 'utf8');
@@ -75,7 +77,7 @@ export class ExportService {
     ]) || [];
 
     const csvContent = [headers, ...rows]
-      .map(row => row.map(field => `"${field.toString().replace(/"/g, '""')}"`).join(';'))
+      .map(row => row.map(escapeCsvCell).join(';'))
       .join('\n');
 
     return Buffer.from('\ufeff' + csvContent, 'utf8');
@@ -109,17 +111,16 @@ export class ExportService {
     ]);
 
     const parts: string[] = [];
-    const csvEscape = (val: unknown) => '"' + String(val).replace(/"/g, '""') + '"';
 
     // Abschnitt 1: Inventur-Positionen
-    parts.push(linesHeaders.map(csvEscape).join(';'));
-    for (const row of lineRows) parts.push(row.map(csvEscape).join(';'));
+    parts.push(linesHeaders.map(escapeCsvCell).join(';'));
+    for (const row of lineRows) parts.push(row.map(escapeCsvCell).join(';'));
 
     // Leerzeilen + Abschnitt 2: Buchungen
     parts.push('');
     parts.push('"Buchungen aus Inventur"');
-    parts.push(movementHeaders.map(csvEscape).join(';'));
-    for (const row of movementRows) parts.push(row.map(csvEscape).join(';'));
+    parts.push(movementHeaders.map(escapeCsvCell).join(';'));
+    for (const row of movementRows) parts.push(row.map(escapeCsvCell).join(';'));
 
     return Buffer.from('\ufeff' + parts.join('\n'), 'utf8');
   }
@@ -960,14 +961,14 @@ export class ExportService {
     };
 
     // Replace header values
-    html = html.replace(/\{\{title\}\}/g, this.escapeHtml(title));
-    html = html.replace(/\{\{subtitle\}\}/g, this.escapeHtml(subtitle));
+    html = html.replace(/\{\{title\}\}/g, escapeHtml(title));
+    html = html.replace(/\{\{subtitle\}\}/g, escapeHtml(subtitle));
     html = replaceConditional(html, 'logo', company.logoDataUrl, company.logoDataUrl || '');
     html = html.replace(/\{\{logo\}\}/g, company.logoDataUrl || '');
     html = replaceConditional(html, 'vehicle', vehicleName, vehicleName || '');
-    html = html.replace(/\{\{vehicle\}\}/g, this.escapeHtml(vehicleName || ''));
+    html = html.replace(/\{\{vehicle\}\}/g, escapeHtml(vehicleName || ''));
     html = replaceConditional(html, 'technician', technicianName, technicianName || '');
-    html = html.replace(/\{\{technician\}\}/g, this.escapeHtml(technicianName || ''));
+    html = html.replace(/\{\{technician\}\}/g, escapeHtml(technicianName || ''));
 
     // Build group headers HTML
     let groupHeadersHtml = '';
@@ -978,7 +979,7 @@ export class ExportService {
       const groupHeaderMatch = html.match(/\{\{#groupHeaders\}\}([\s\S]*?)\{\{\/groupHeaders\}\}/);
       if (groupHeaderMatch) {
         let groupHeaderTemplate = groupHeaderMatch[1];
-        groupHeaderTemplate = groupHeaderTemplate.replace(/\{\{groupName\}\}/g, this.escapeHtml(group.groupName));
+        groupHeaderTemplate = groupHeaderTemplate.replace(/\{\{groupName\}\}/g, escapeHtml(group.groupName));
         groupHeadersHtml += groupHeaderTemplate;
       }
 
@@ -991,11 +992,11 @@ export class ExportService {
           const codeVal = item.qrCodeValue?.trim() || item.code;
           
           itemHtml = replaceConditional(itemHtml, 'manufacturerTag', item.manufacturer, item.manufacturer || '');
-          itemHtml = itemHtml.replace(/\{\{manufacturer\}\}/g, this.escapeHtml(item.manufacturer || ''));
-          itemHtml = itemHtml.replace(/\{\{code\}\}/g, this.escapeHtml(codeVal));
-          itemHtml = itemHtml.replace(/\{\{description\}\}/g, this.escapeHtml(item.description || ''));
+          itemHtml = itemHtml.replace(/\{\{manufacturer\}\}/g, escapeHtml(item.manufacturer || ''));
+          itemHtml = itemHtml.replace(/\{\{code\}\}/g, escapeHtml(codeVal));
+          itemHtml = itemHtml.replace(/\{\{description\}\}/g, escapeHtml(item.description || ''));
           itemHtml = replaceConditional(itemHtml, 'secondaryDescription', item.descriptionSecondary, item.descriptionSecondary || '');
-          itemHtml = itemHtml.replace(/\{\{secondaryDescription\}\}/g, this.escapeHtml(item.descriptionSecondary || ''));
+          itemHtml = itemHtml.replace(/\{\{secondaryDescription\}\}/g, escapeHtml(item.descriptionSecondary || ''));
           itemHtml = itemHtml.replace(/\{\{qrCodeDataUrl\}\}/g, qrCodes.get(codeVal) || '');
           
           itemsHtml += itemHtml;
@@ -1043,17 +1044,6 @@ export class ExportService {
     } finally {
       await browser.close();
     }
-  }
-
-  private escapeHtml(text: string): string {
-    const map: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#039;'
-    };
-    return text.replace(/[&<>"']/g, (m) => map[m]);
   }
 
   private translateMovementType(type: string): string {

@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 
 import { LocationsService } from "../locations/locations.service";
 import { User } from "../users/entities/user.entity";
 
+import type { CreateVehicleDto } from "./dto/create-vehicle.dto";
+import { UpdateVehicleDto } from "./dto/update-vehicle.dto";
 import { Vehicle } from "./entities/vehicle.entity";
 
 @Injectable()
@@ -28,11 +30,11 @@ export class VehiclesService {
     return this.repository.findOne({ where });
   }
 
-  async create(data: Pick<Vehicle, "licensePlate" | "description">, branchId?: string | null): Promise<Vehicle> {
+  async create(data: Pick<CreateVehicleDto, "licensePlate" | "description">, branchId?: string | null): Promise<Vehicle> {
     const where = branchId ? { licensePlate: data.licensePlate, branchId } : { licensePlate: data.licensePlate };
     const exists = await this.repository.findOne({ where });
     if (exists) {
-      throw new Error('Kennzeichen bereits vergeben');
+      throw new BadRequestException("Kennzeichen bereits vergeben");
     }
     const entity = this.repository.create({ ...data, branchId: branchId ?? null });
     const saved = await this.repository.save(entity);
@@ -40,12 +42,13 @@ export class VehiclesService {
     return saved;
   }
 
-  async update(id: string, data: Partial<Vehicle>, branchId?: string | null): Promise<Vehicle> {
+  async update(id: string, data: UpdateVehicleDto, branchId?: string | null): Promise<Vehicle> {
     const where: Record<string, unknown> = { id };
     if (branchId) where.branchId = branchId;
     const entity = await this.repository.findOne({ where });
     if (!entity) throw new NotFoundException("Vehicle not found");
-    Object.assign(entity, data);
+    if (data.licensePlate !== undefined) entity.licensePlate = data.licensePlate;
+    if (data.description !== undefined) entity.description = data.description;
     const saved = await this.repository.save(entity);
     await this.locationsService.ensureVehicleLocation(saved);
     return saved;

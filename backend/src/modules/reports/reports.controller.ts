@@ -1,6 +1,7 @@
 import { Body, Controller, Get, ParseIntPipe, Put, Query, Res, UseGuards, Req, ForbiddenException } from "@nestjs/common";
 import { Response } from 'express';
 
+import { buildContentDisposition } from "../../common/utils/content-disposition.util";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
@@ -249,7 +250,7 @@ export class ReportsController {
 
     const filename = `GDPdU_Export_${dateFrom.toISOString().slice(0, 10)}_${dateTo.toISOString().slice(0, 10)}.zip`;
     res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", buildContentDisposition('attachment', filename));
     res.send(zipBuffer);
   }
 }

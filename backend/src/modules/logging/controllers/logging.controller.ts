@@ -16,10 +16,13 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 
+import { buildContentDisposition } from '../../../common/utils/content-disposition.util';
+import { escapeCsvCell } from '../../../common/utils/csv.util';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { User } from '../../users/entities/user.entity';
+import { ArchiveBundleDto, ArchiveRetentionDto, CleanupArchivesDto, CleanupOldLogsDto, ForceArchiveDto, LogRetentionDto, SetLogLevelDto } from '../dto/logging-config.dto';
 import { LogLevel, LogCategory } from '../entities/system-log.entity';
 import { LogArchiveService } from '../services/log-archive.service';
 import { LoggingService, LogFilters } from '../services/logging.service';
@@ -250,13 +253,13 @@ export class LoggingController {
         log.createdAt.toISOString(),
         log.level,
         log.category,
-        `"${(log.action || '').replace(/"/g, '""')}"`,
-        `"${(log.details || '').replace(/"/g, '""')}"`,
+        escapeCsvCell(log.action),
+        escapeCsvCell(log.details),
         log.userId || '',
         log.user?.username || '',
         log.ipAddress || '',
-        `"${(log.userAgent || '').replace(/"/g, '""')}"`,
-        `"${JSON.stringify(log.metadata || {}).replace(/"/g, '""')}"`,
+        escapeCsvCell(log.userAgent),
+        escapeCsvCell(JSON.stringify(log.metadata || {})),
       ];
       return row.join(',');
     });
@@ -283,7 +286,7 @@ export class LoggingController {
 
     if (res) {
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Disposition', buildContentDisposition('attachment', filename));
       res.setHeader('Content-Length', Buffer.byteLength(csvContent, 'utf-8'));
       res.status(HttpStatus.OK);
       res.end(csvContent, 'utf-8');
@@ -368,7 +371,7 @@ export class LoggingController {
 
     if (res) {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Disposition', buildContentDisposition('attachment', filename));
       res.setHeader('Content-Length', Buffer.byteLength(jsonContent, 'utf-8'));
       res.status(HttpStatus.OK);
       res.end(jsonContent, 'utf-8');
@@ -433,7 +436,7 @@ export class LoggingController {
    */
   @Put('config/level')
   @Roles('MANAGER')
-  async setLogLevel(@Body() body: { logLevel: LogLevel }, @Req() req?: RequestWithUser) {
+  async setLogLevel(@Body() body: SetLogLevelDto, @Req() req?: RequestWithUser) {
     this.requireSuperAdmin(req);
     if (!Object.values(LogLevel).includes(body.logLevel)) {
       throw new BadRequestException('Ungültiger Log-Level');
@@ -463,7 +466,7 @@ export class LoggingController {
    */
   @Post('cleanup/old')
   @Roles('MANAGER')
-  async cleanupOldLogs(@Body() body: { daysToKeep?: number }, @Req() req?: RequestWithUser) {
+  async cleanupOldLogs(@Body() body: CleanupOldLogsDto, @Req() req?: RequestWithUser) {
     this.requireSuperAdmin(req);
     const daysToKeep = body.daysToKeep || 90;
     
@@ -596,7 +599,7 @@ export class LoggingController {
    */
   @Put('config/retention')
   @Roles('MANAGER')
-  async setLogRetention(@Body() body: { retentionDays: number }, @Req() req?: RequestWithUser) {
+  async setLogRetention(@Body() body: LogRetentionDto, @Req() req?: RequestWithUser) {
     this.requireSuperAdmin(req);
     const days = body.retentionDays;
     
@@ -649,7 +652,7 @@ export class LoggingController {
 
   @Put('archives/config/retention')
   @Roles('MANAGER')
-  async setArchiveRetention(@Body() body: { retentionDays: number }, @Req() req: RequestWithUser) {
+  async setArchiveRetention(@Body() body: ArchiveRetentionDto, @Req() req: RequestWithUser) {
     this.requireSuperAdmin(req);
     const days = body.retentionDays;
     if (!days || isNaN(days) || days < 1 || days > 36500) {
@@ -661,7 +664,7 @@ export class LoggingController {
 
   @Post('archives/cleanup')
   @Roles('MANAGER')
-  async cleanupArchives(@Body() body: { daysToKeep?: number }, @Req() req: RequestWithUser) {
+  async cleanupArchives(@Body() body: CleanupArchivesDto, @Req() req: RequestWithUser) {
     this.requireSuperAdmin(req);
     const days = body.daysToKeep ?? (await this.loggingService.getArchiveRetentionDays());
     if (days < 1 || days > 36500) throw new BadRequestException('daysToKeep muss zwischen 1 und 36500 liegen');
@@ -671,7 +674,7 @@ export class LoggingController {
 
   @Post('archives/force-archive')
   @Roles('MANAGER')
-  async forceArchive(@Body() body: { date?: string }, @Req() req: RequestWithUser) {
+  async forceArchive(@Body() body: ForceArchiveDto, @Req() req: RequestWithUser) {
     this.requireSuperAdmin(req);
     const date = body.date || new Date().toISOString().slice(0, 10);
     const result = await this.archiveService.archiveLogs(date);
@@ -705,7 +708,7 @@ export class LoggingController {
     this.requireSuperAdmin(req);
     const content = this.archiveService.readArchiveFile(date, category);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="logs-${date}-${category}.json"`);
+    res.setHeader('Content-Disposition', buildContentDisposition('attachment', `logs-${date}-${category}.json`));
     res.setHeader('Content-Length', content.length);
     res.status(HttpStatus.OK).end(content);
   }
@@ -713,7 +716,7 @@ export class LoggingController {
   @Post('archives/download/zip')
   @Roles('MANAGER')
   downloadArchiveBundle(
-    @Body() body: { dates: string[] },
+    @Body() body: ArchiveBundleDto,
     @Req() req: RequestWithUser,
     @Res() res: Response,
   ) {
@@ -724,7 +727,7 @@ export class LoggingController {
     const content = this.archiveService.buildBundle(body.dates);
     const filename = `logs-archive-${new Date().toISOString().slice(0, 10)}.json`;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', buildContentDisposition('attachment', filename));
     res.setHeader('Content-Length', content.length);
     res.status(HttpStatus.OK).end(content);
   }

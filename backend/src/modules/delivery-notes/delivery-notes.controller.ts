@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import { Response, Request } from "express";
 
+import { buildContentDisposition } from "../../common/utils/content-disposition.util";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 
 import { DeliveryNotesService } from "./delivery-notes.service";
@@ -48,7 +49,7 @@ export class DeliveryNotesController {
     if (!fs.existsSync(absPath)) throw new NotFoundException("Datei nicht gefunden");
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${vorgangsnummer}.pdf"`);
+    res.setHeader("Content-Disposition", buildContentDisposition("inline", `${vorgangsnummer}.pdf`));
     fs.createReadStream(absPath).pipe(res);
   }
 }

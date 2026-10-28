@@ -18,6 +18,7 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import { Request } from "express";
 import type { Response } from "express";
 
+import { buildContentDisposition } from "../../common/utils/content-disposition.util";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
@@ -188,17 +189,17 @@ export class InventoryController {
     if (format === 'csv') {
       const csvBuffer = this.exportService.exportInventoryToCsv(filteredSession);
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="inventur_${session.name.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.csv"`);
+      res.setHeader('Content-Disposition', buildContentDisposition('attachment', `inventur_${session.name.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`));
       res.send(csvBuffer);
     } else if (format === 'xlsx') {
       const xlsxBuffer = await this.templateService.renderSessionToXlsx(filteredSession);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="inventur_${session.name.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx"`);
+      res.setHeader('Content-Disposition', buildContentDisposition('attachment', `inventur_${session.name.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`));
       res.send(xlsxBuffer);
     } else {
       const pdfBuffer = await this.exportService.exportInventoryToPdf(filteredSession);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="inventur_${session.name.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf"`);
+      res.setHeader('Content-Disposition', buildContentDisposition('attachment', `inventur_${session.name.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`));
       res.send(pdfBuffer);
     }
   }
@@ -217,20 +218,20 @@ export class InventoryController {
     if (format === "pdf") {
       const pdf = await this.exportService.exportInventoryProtocolPdf(session, movements);
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="inventur_protokoll_${session.name}.pdf"`);
+      res.setHeader("Content-Disposition", buildContentDisposition("attachment", `inventur_protokoll_${session.name}.pdf`));
       return res.send(pdf);
     }
 
     if (format === "xlsx") {
       const xlsx = await this.exportService.exportInventoryProtocolXlsx(session, movements);
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.setHeader("Content-Disposition", `attachment; filename="inventur_protokoll_${session.name}.xlsx"`);
+      res.setHeader("Content-Disposition", buildContentDisposition("attachment", `inventur_protokoll_${session.name}.xlsx`));
       return res.send(xlsx);
     }
 
     const csv = this.exportService.exportInventoryProtocolCsv(session, movements);
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="inventur_protokoll_${session.name}.csv"`);
+    res.setHeader("Content-Disposition", buildContentDisposition("attachment", `inventur_protokoll_${session.name}.csv`));
     return res.send(csv);
   }
 
@@ -312,7 +313,7 @@ export class InventoryController {
   async downloadTemplate(@Res() res: Response) {
     const { buffer, meta } = await this.templateService.downloadTemplate();
     res.setHeader("Content-Type", meta.mimeType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="${meta.filename || "inventur_template.xlsx"}"`);
+    res.setHeader("Content-Disposition", buildContentDisposition("attachment", meta.filename || "inventur_template.xlsx"));
     res.send(buffer);
   }
 

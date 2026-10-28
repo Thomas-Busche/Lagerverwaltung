@@ -96,10 +96,7 @@ export class LocationsService {
       throw new BadRequestException("Vehicle locations are managed by the system.");
     }
 
-    const parent = data.parentId ? await this.repository.findOne({ where: { id: data.parentId } }) : null;
-    if (data.parentId && !parent) {
-      throw new NotFoundException("Parent location not found");
-    }
+    const parent = data.parentId ? await this.findParentInBranch(data.parentId, data.branchId ?? null) : null;
 
     const parentId = parent?.id ?? null;
     const branchId = data.branchId ?? null;
@@ -127,8 +124,8 @@ export class LocationsService {
     return this.repository.save(entity);
   }
 
-  async update(id: string, data: { code?: string; name?: string; parentId?: string | null }) {
-    const location = await this.findOne(id);
+  async update(id: string, data: { code?: string; name?: string; parentId?: string | null }, branchId?: string | null) {
+    const location = await this.findOne(id, branchId);
     if (location.type === "VEHICLE" || location.vehicle) {
       throw new BadRequestException("Vehicle locations cannot be edited here.");
     }
@@ -147,11 +144,7 @@ export class LocationsService {
       if (!data.parentId) {
         location.parent = null;
       } else {
-        const parent = await this.repository.findOne({ where: { id: data.parentId } });
-        if (!parent) {
-          throw new NotFoundException("Parent location not found");
-        }
-        location.parent = parent;
+        location.parent = await this.findParentInBranch(data.parentId, location.branchId ?? null);
       }
     }
 
@@ -163,6 +156,15 @@ export class LocationsService {
     }
 
     return this.repository.save(location);
+  }
+
+  // A parent from another branch would leak/attach locations across tenants; report it as missing.
+  private async findParentInBranch(parentId: string, branchId: string | null): Promise<Location> {
+    const parent = await this.repository.findOne({ where: { id: parentId } });
+    if (!parent || (parent.branchId ?? null) !== branchId) {
+      throw new NotFoundException("Parent location not found");
+    }
+    return parent;
   }
 
   private buildAutoCodeBase(type: string, name?: string): string {
@@ -228,8 +230,8 @@ export class LocationsService {
     return count > 0;
   }
 
-  async remove(id: string): Promise<void> {
-    const location = await this.findOne(id);
+  async remove(id: string, branchId?: string | null): Promise<void> {
+    const location = await this.findOne(id, branchId);
     if (location.type === "VEHICLE" || location.vehicle) {
       throw new BadRequestException("Vehicle locations cannot be deleted here.");
     }

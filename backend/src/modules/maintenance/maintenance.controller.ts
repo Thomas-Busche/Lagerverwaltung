@@ -5,7 +5,9 @@ import {
 import type { Request as ExpressRequest } from "express";
 
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
+import { assertSuperAdmin } from "../users/utils/user-access.util";
 
+import { MovementCleanupDto, MovementRetentionDto } from "./dto/maintenance.dto";
 import { MaintenanceService } from "./maintenance.service";
 
 @Controller("maintenance")
@@ -20,9 +22,7 @@ export class MaintenanceController {
   }
 
   private requireSuperAdmin(req: ExpressRequest) {
-    if (req.user?.role !== "MANAGER" || req.user?.branchId !== null) {
-      throw new ForbiddenException("Nur Super-Admins können diese Aktion ausführen.");
-    }
+    assertSuperAdmin(req.user);
   }
 
   @Get("check")
@@ -33,7 +33,8 @@ export class MaintenanceController {
 
   @Post("fix")
   async fix(@Request() req: ExpressRequest) {
-    this.requireManager(req);
+    // System-wide data repair, not limited to one branch
+    this.requireSuperAdmin(req);
     return this.maintenanceService.fixIssues();
   }
 
@@ -55,12 +56,9 @@ export class MaintenanceController {
   }
 
   @Put("movement-retention")
-  async setMovementRetention(@Body() body: { retentionDays: number }, @Request() req: ExpressRequest) {
+  async setMovementRetention(@Body() body: MovementRetentionDto, @Request() req: ExpressRequest) {
     this.requireSuperAdmin(req);
-    const days = Number(body.retentionDays);
-    if (!days || isNaN(days) || days < 365 || days > 36500) {
-      throw new BadRequestException("Aufbewahrungsdauer muss zwischen 365 und 36500 Tagen liegen.");
-    }
+    const days = body.retentionDays;
     await this.maintenanceService.setMovementRetentionDays(days);
     return { success: true, retentionDays: days };
   }
@@ -76,12 +74,9 @@ export class MaintenanceController {
   }
 
   @Post("movement-cleanup")
-  async runMovementCleanup(@Body() body: { days: number }, @Request() req: ExpressRequest) {
+  async runMovementCleanup(@Body() body: MovementCleanupDto, @Request() req: ExpressRequest) {
     this.requireSuperAdmin(req);
-    const days = Number(body.days);
-    if (!days || isNaN(days) || days < 365) {
-      throw new BadRequestException("days muss >= 365 sein.");
-    }
+    const days = body.days;
     return this.maintenanceService.deleteOldMovements(days);
   }
 }

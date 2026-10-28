@@ -21,4 +21,8 @@ export class CreateLocationDto {
   @IsOptional()
   @IsString()
   parentId?: string;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }

@@ -90,7 +90,7 @@ const QuickBookingPage: React.FC = () => {
   // bleibt).
   const items = useItemsStore((state) => state.items);
   const loadItems = useItemsStore((state) => state.loadItems);
-  const { user } = useAuthStore();
+  const { user, token } = useAuthStore();
   const { playSuccess, playError } = useScanSound();
 
   const [mode, setMode] = useState<BookingMode>("CHECKOUT");
@@ -164,10 +164,11 @@ const QuickBookingPage: React.FC = () => {
     // Sekunden neu zu verbinden, sobald die Verbindung fehlschlaegt - bei
     // einem Techniker, der den ganzen Tag offline ist, lief das dauerhaft im
     // Hintergrund und belastete Hauptthread/Akku spuerbar.
-    if (!user?.id || isEffectivelyOffline()) return;
+    if (!user?.id || !token || isEffectivelyOffline()) return;
     const socket = io("/stock", {
       path: "/socket.io",
       transports: ["websocket"],
+      auth: { token },
       reconnectionDelay: 2000,
       reconnectionDelayMax: 30000,
     });
@@ -220,7 +221,7 @@ const QuickBookingPage: React.FC = () => {
       socketRef.current = null;
       setSyncConnected(false);
     };
-  }, [user?.id]);
+  }, [user?.id, token]);
 
   // Listenänderungen an alle anderen Geräte senden
   useEffect(() => {

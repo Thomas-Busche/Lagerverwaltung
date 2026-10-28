@@ -4,9 +4,11 @@ import { PassportStrategy } from "@nestjs/passport";
 import { ExtractJwt, Strategy } from "passport-jwt";
 
 import { UsersService } from "../../users/users.service";
+import { isAccessTokenPayload } from "../utils/token-type.util";
 
 interface JwtPayload {
   sub: string;
+  tokenType?: string;
 }
 
 @Injectable()
@@ -18,11 +20,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>("auth.jwtSecret"),
+      secretOrKey: configService.getOrThrow<string>("auth.jwtSecret"),
     });
   }
 
   async validate(payload: JwtPayload): Promise<Express.User | null> {
+    if (!isAccessTokenPayload(payload)) return null;
     // Load the full user from the database
     const user = await this.usersService.findOneById(payload.sub);
     if (!user) return null;

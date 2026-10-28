@@ -13,6 +13,7 @@ import { ChangePasswordDto } from "./dto/change-password.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 import { User } from "./entities/user.entity";
+import { assertCanAccessUser, isSuperAdmin, resolveWritableBranchId } from "./utils/user-access.util";
 import { UsersService } from "./users.service";
 
 const SAFE_KEY = /^[a-zA-Z0-9._-]{1,100}$/;
@@ -101,14 +102,7 @@ export class UsersController {
     const user = await this.usersService.findOneById(id);
     if (!user) throw new NotFoundException("Benutzer nicht gefunden");
 
-    // Cross-Branch-Schutz: Nicht-Manager dürfen nur eigene Niederlassung einsehen
-    if (
-      currentUser.role !== "MANAGER" &&
-      currentUser.branchId !== null &&
-      user.branchId !== currentUser.branchId
-    ) {
-      throw new NotFoundException("Benutzer nicht gefunden");
-    }
+    assertCanAccessUser(currentUser, user);
 
     return user;
   }
@@ -117,12 +111,8 @@ export class UsersController {
   @Roles("MANAGER")
   @Permissions("users.create")
   create(@Body() dto: CreateUserDto, @CurrentUser() currentUser: User) {
-    // Branch-Manager: neue User bekommen automatisch die eigene branchId,
-    // sofern nicht explizit eine andere angegeben wurde.
-    // SUPER_ADMIN (branchId = null): branchId aus DTO übernehmen (kann null sein).
-    const branchId = currentUser.branchId !== null
-      ? (dto.branchId !== undefined ? dto.branchId : currentUser.branchId)
-      : (dto.branchId !== undefined ? dto.branchId : null);
+    // Branch managers can only create users in their own branch; only super-admins may create branch-less users.
+    const branchId = resolveWritableBranchId(currentUser, dto.branchId, null);
     return this.usersService.create({ ...dto, branchId });
   }
 
@@ -137,6 +127,12 @@ export class UsersController {
       delete dto.vehicleId; delete dto.locationIds;
     }
     const currentData = await this.usersService.findOneById(id);
+    if (currentData && currentUser.role === "MANAGER") {
+      assertCanAccessUser(currentUser, currentData);
+      if (dto.branchId !== undefined) {
+        dto.branchId = resolveWritableBranchId(currentUser, dto.branchId, null);
+      }
+    }
     const result = await this.usersService.update(id, dto);
     if (dto.role && currentData && currentData.role !== dto.role) {
       await this.loggingService.logSecurity("USER_ROLE_CHANGED",
@@ -151,9 +147,11 @@ export class UsersController {
   @Permissions("users.delete")
   async remove(@Param("id") id: string, @CurrentUser() currentUser: User) {
     const userToDelete = await this.usersService.findOneById(id);
+    if (userToDelete) assertCanAccessUser(currentUser, userToDelete);
+    // Only the id is logged (no clear-text username) for data minimisation
     await this.loggingService.logSecurity("USER_DELETED",
       "Benutzer " + id + " wurde geloescht",
-      { userId: currentUser.id, metadata: { targetUserId: id, username: userToDelete?.username } });
+      { userId: currentUser.id, metadata: { targetUserId: id } });
     return this.usersService.remove(id);
   }
 
@@ -164,8 +162,7 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   async anonymizeUser(@Param("id") id: string, @Req() req: Request, @CurrentUser() currentUser: User) {
     const isSelf = req.user?.id === id;
-    const isSuperAdmin = req.user?.role === "SUPER_ADMIN";
-    if (!isSelf && !isSuperAdmin) {
+    if (!isSelf && !isSuperAdmin(req.user)) {
       throw new ForbiddenException("Keine Berechtigung zur Anonymisierung dieses Benutzers");
     }
     await this.usersService.anonymizeUser(id);
@@ -183,6 +180,10 @@ export class UsersController {
     // Nur eigene Daten oder MANAGER dürfen exportieren
     if (currentUser.role !== "MANAGER" && currentUser.id !== id) {
       throw new ForbiddenException("Keine Berechtigung");
+    }
+    if (currentUser.id !== id) {
+      const target = await this.usersService.findOneById(id);
+      if (target) assertCanAccessUser(currentUser, target);
     }
     return this.usersService.getUserDataExport(id);
   }
@@ -202,10 +203,10 @@ export class UsersController {
       // Log den Fehlschlag
       await this.loggingService.logSecurity(
         'PASSWORD_CHANGE_FAILED',
-        `Fehlgeschlagene Passwort-Änderung für ${user.username}: ${errorMessage}`,
+        `Fehlgeschlagene Passwort-Änderung für Benutzer ${user.id}: ${errorMessage}`,
         {
           userId: user.id,
-          metadata: { username: user.username, error: errorMessage }
+          metadata: { error: errorMessage }
         }
       );
       

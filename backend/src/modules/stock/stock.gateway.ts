@@ -1,16 +1,21 @@
 import { Injectable, Logger, UseGuards } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import {
   WebSocketGateway,
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 
-import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
+import { buildAllowedOrigins } from '../../common/cors-origins';
+import { extractSocketToken, WsJwtGuard } from '../../common/guards/ws-jwt.guard';
+import { UsersService } from '../users/users.service';
 
 import { StockService } from './stock.service';
 
@@ -25,16 +30,28 @@ export interface QuickBookingEntry {
   reference?: string;
 }
 
+export interface SocketUser {
+  id: string;
+  role: string;
+  branchId: string | null;
+  vehicleId: string | null;
+  locationIds: string[];
+}
+
+// Super-admins (no branch) receive the broadcasts of every branch.
+export const ALL_BRANCHES_ROOM = 'branch:all';
+export const branchRoom = (branchId: string) => `branch:${branchId}`;
+
 @WebSocketGateway({
   namespace: '/stock',
   cors: {
-    origin: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(','),
+    origin: buildAllowedOrigins(),
     credentials: true,
   },
 })
 @UseGuards(WsJwtGuard)
 @Injectable()
-export class StockGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class StockGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(StockGateway.name);
 
   @WebSocketServer()
@@ -43,14 +60,56 @@ export class StockGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Speichert den aktuellen Buchungszustand pro User (userId → Liste)
   private readonly quickbookState = new Map<string, QuickBookingEntry[]>();
 
-  constructor(private readonly stockService: StockService) {}
+  constructor(
+    private readonly stockService: StockService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    private readonly usersService: UsersService,
+  ) {}
+
+  // Runs before the 'connection' event, so no message can arrive from an unauthenticated socket.
+  afterInit(server: Server) {
+    server.use((client, next) => {
+      this.authenticate(client).then(
+        () => next(),
+        () => next(new Error('Unauthorized')),
+      );
+    });
+  }
+
+  /** Verifies the access token and stores the DB-backed user in client.data. */
+  async authenticate(client: Socket): Promise<SocketUser> {
+    const token = extractSocketToken(client);
+    if (!token) throw new Error('Unauthorized');
+    const payload = this.jwtService.verify<{ sub?: string; tokenType?: string }>(token, {
+      secret: this.configService.get<string>('auth.jwtSecret'),
+    });
+    // Refresh / MFA tokens share the signing secret but must never open a socket.
+    if (payload.tokenType || !payload.sub) throw new Error('Unauthorized');
+    const user = await this.usersService.findOneById(payload.sub);
+    if (!user) throw new Error('Unauthorized');
+    const socketUser: SocketUser = {
+      id: user.id,
+      role: user.role,
+      branchId: user.branchId ?? null,
+      vehicleId: user.vehicleId ?? null,
+      locationIds: user.locations?.map((l) => l.id) ?? [],
+    };
+    (client.data as { user?: SocketUser }).user = socketUser;
+    return socketUser;
+  }
+
+  private getUser(client: Socket): SocketUser | undefined {
+    return (client.data as { user?: SocketUser }).user;
+  }
 
   handleConnection(client: Socket) {
-    void client;
-    const branchId: string | undefined = (client.data as { user?: { branchId?: string } })?.user?.branchId;
-    if (branchId) {
-      void client.join('restock:' + branchId);
+    const user = this.getUser(client);
+    if (!user) {
+      client.disconnect(true);
+      return;
     }
+    void client.join(user.branchId ? branchRoom(user.branchId) : ALL_BRANCHES_ROOM);
   }
 
   handleDisconnect(client: Socket) {
@@ -61,90 +120,88 @@ export class StockGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('subscribeRestock')
   async handleSubscribeRestock(client: Socket) {
-    const overview = await this.stockService.getRestockOverview({ status: 'OPEN' });
+    const user = this.getUser(client);
+    if (!user) return;
+    const overview = await this.stockService.getRestockOverview({ status: 'OPEN' }, user.branchId, user.locationIds);
     client.emit('restockUpdate', overview);
   }
 
-  broadcastRestockUpdate() {
-    if (this.server) {
-      this.server.emit('restock:updated', { refresh: true });
-    } else {
-      this.logger.warn('Kein Socket-Server verfuegbar, restock:updated nicht gesendet');
+  // With a branchId the event goes to that branch (+ super-admins). Without one the origin is unknown,
+  // so every authenticated socket gets the payload-free refresh hint.
+  private emitToBranch(event: string, branchId?: string | null) {
+    if (!this.server) {
+      this.logger.warn(`Kein Socket-Server verfuegbar, ${event} nicht gesendet`);
+      return;
     }
+    const target = branchId ? this.server.to([branchRoom(branchId), ALL_BRANCHES_ROOM]) : this.server;
+    target.emit(event, { refresh: true });
+  }
+
+  broadcastRestockUpdate(branchId?: string | null) {
+    this.emitToBranch('restock:updated', branchId);
   }
 
   // Signalisiert, dass sich Lagerbestand (Ist-Bestand) geaendert hat, damit
   // z.B. eine bereits geoeffnete Artikeldaten-Seite live nachziehen kann,
   // statt nur beim naechsten manuellen Neuladen aktuell zu sein.
-  broadcastItemsUpdated() {
-    if (this.server) {
-      this.server.emit('items:updated', { refresh: true });
-    } else {
-      this.logger.warn('Kein Socket-Server verfuegbar, items:updated nicht gesendet');
-    }
+  broadcastItemsUpdated(branchId?: string | null) {
+    this.emitToBranch('items:updated', branchId);
   }
 
   // ── Schnellbuchung Echtzeit-Sync ──────────────────────────────────────────
+  // The user id always comes from the authenticated socket; a client-supplied userId
+  // would let anyone join or overwrite another user's booking list.
 
   /** Gerät tritt dem Room des Users bei und erhält sofort den aktuellen Stand. */
   @SubscribeMessage('quickbook:join')
-  async handleQuickbookJoin(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { userId: string },
-  ) {
-    if (!data?.userId) return;
-    const room = `quickbook:${data.userId}`;
-    await client.join(room);
-    const current = this.quickbookState.get(data.userId) ?? [];
-    client.emit('quickbook:state', { list: current });
-    this.logger.debug(`quickbook:join userId=${data.userId} socketId=${client.id}`);
+  async handleQuickbookJoin(@ConnectedSocket() client: Socket) {
+    const userId = this.getUser(client)?.id;
+    if (!userId) return;
+    await client.join(`quickbook:${userId}`);
+    client.emit('quickbook:state', { list: this.quickbookState.get(userId) ?? [] });
+    this.logger.debug(`quickbook:join userId=${userId} socketId=${client.id}`);
   }
 
   /** Ein Gerät sendet die aktualisierte Liste → Server speichert und broadcastet. */
   @SubscribeMessage('quickbook:update')
   handleQuickbookUpdate(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { userId: string; list: QuickBookingEntry[] },
+    @MessageBody() data: { list: QuickBookingEntry[] },
   ) {
-    if (!data?.userId) return;
-    this.quickbookState.set(data.userId, data.list ?? []);
-    const room = `quickbook:${data.userId}`;
+    const userId = this.getUser(client)?.id;
+    if (!userId) return;
+    const list = data?.list ?? [];
+    this.quickbookState.set(userId, list);
     // Allen anderen Geräten im Room senden (excludes sender)
-    client.to(room).emit('quickbook:state', { list: data.list ?? [] });
+    client.to(`quickbook:${userId}`).emit('quickbook:state', { list });
   }
 
   /** Buchung abgeschlossen – Liste auf allen Geräten leeren. */
   @SubscribeMessage('quickbook:booked')
-  handleQuickbookBooked(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { userId: string },
-  ) {
-    if (!data?.userId) return;
-    this.quickbookState.delete(data.userId);
-    const room = `quickbook:${data.userId}`;
-    client.to(room).emit('quickbook:booked');
+  handleQuickbookBooked(@ConnectedSocket() client: Socket) {
+    const userId = this.getUser(client)?.id;
+    if (!userId) return;
+    this.quickbookState.delete(userId);
+    client.to(`quickbook:${userId}`).emit('quickbook:booked');
   }
 
   /** Manuelles Löschen der Liste auf allen Geräten. */
   @SubscribeMessage('quickbook:clear')
-  handleQuickbookClear(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { userId: string },
-  ) {
-    if (!data?.userId) return;
-    this.quickbookState.delete(data.userId);
-    const room = `quickbook:${data.userId}`;
-    client.to(room).emit('quickbook:cleared');
+  handleQuickbookClear(@ConnectedSocket() client: Socket) {
+    const userId = this.getUser(client)?.id;
+    if (!userId) return;
+    this.quickbookState.delete(userId);
+    client.to(`quickbook:${userId}`).emit('quickbook:cleared');
   }
 
   /** Vorgangsnummer an alle anderen Geräte im Room übertragen. */
   @SubscribeMessage('quickbook:reference')
   handleQuickbookReference(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { userId?: string; reference: string },
+    @MessageBody() data: { reference: string },
   ) {
-    if (!data?.userId) return;
-    const room = `quickbook:${data.userId}`;
-    client.to(room).emit('quickbook:reference', { reference: data.reference });
+    const userId = this.getUser(client)?.id;
+    if (!userId) return;
+    client.to(`quickbook:${userId}`).emit('quickbook:reference', { reference: data?.reference });
   }
 }

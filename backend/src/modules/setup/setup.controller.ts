@@ -1,9 +1,9 @@
 import { Readable } from "stream";
 
-import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Param, Post, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Param, Post, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Throttle } from "@nestjs/throttler";
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { memoryStorage } from "multer";
 
 import { Permissions } from "../access-control/decorators/permissions.decorator";
@@ -11,6 +11,7 @@ import { PermissionsGuard } from "../access-control/guards/permissions.guard";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
+import { LoggingService } from "../logging/services/logging.service";
 import { UsersService } from "../users/users.service";
 
 import { BackupPayload } from "./backup-payload.types";
@@ -24,7 +25,24 @@ export class SetupController {
   constructor(
     private readonly setupService: SetupService,
     private readonly usersService: UsersService,
+    private readonly loggingService: LoggingService,
   ) {}
+
+  /**
+   * Writes a SECURITY audit entry (NIS2) for backup/restore operations.
+   * Only user id, action and result are stored - no filenames from user input, no payloads.
+   */
+  private async audited<T>(req: Request, action: string, operation: () => Promise<T>): Promise<T> {
+    const context = { userId: req.user?.id, ipAddress: req.ip };
+    try {
+      const result = await operation();
+      await this.loggingService.logSecurity(action, "Ergebnis: Erfolg", context);
+      return result;
+    } catch (error) {
+      await this.loggingService.logSecurity(action, "Ergebnis: Fehlgeschlagen", context).catch(() => undefined);
+      throw error;
+    }
+  }
 
   @Get("status")
   async status() {
@@ -55,25 +73,27 @@ export class SetupController {
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("MANAGER")
   @Permissions("backup.access")
-  async downloadBackup() {
-    const backup = await this.setupService.createBackup();
-    
-    // Serverkopie ablegen, damit Backups im Docker-Volume bestehen bleiben
-    try {
-      await this.setupService.saveManualBackup(backup);
-    } catch (error) {
-      /* Backup-Ablage fehlgeschlagen – kein fataler Fehler */
-    }
+  async downloadBackup(@Req() req: Request) {
+    return this.audited(req, "BACKUP_DOWNLOAD", async () => {
+      const backup = await this.setupService.createBackup();
 
-    return backup;
+      // Serverkopie ablegen, damit Backups im Docker-Volume bestehen bleiben
+      try {
+        await this.setupService.saveManualBackup(backup);
+      } catch (error) {
+        /* Backup-Ablage fehlgeschlagen – kein fataler Fehler */
+      }
+
+      return backup;
+    });
   }
 
   @Post("restore")
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("MANAGER")
   @Permissions("backup.access")
-  async restoreBackup(@Body() backup: BackupPayload) {
-    await this.setupService.restoreBackup(backup);
+  async restoreBackup(@Body() backup: BackupPayload, @Req() req: Request) {
+    await this.audited(req, "BACKUP_RESTORE", () => this.setupService.restoreBackup(backup));
     return { success: true, message: 'Datenbank erfolgreich wiederhergestellt' };
   }
 
@@ -85,8 +105,9 @@ export class SetupController {
     backup: BackupPayload;
     sections: string[];
     filters?: { targetBranchId?: string | null; vehicleIds?: string[] | null; locationIds?: string[] | null };
-  }) {
-    await this.setupService.restoreSelective(body.backup, body.sections, body.filters);
+  }, @Req() req: Request) {
+    await this.audited(req, "BACKUP_RESTORE_SELECTIVE", () =>
+      this.setupService.restoreSelective(body.backup, body.sections, body.filters));
     return { success: true, message: 'Ausgewählte Bereiche wiederhergestellt' };
   }
 
@@ -97,8 +118,8 @@ export class SetupController {
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("MANAGER")
   @Permissions("backup.access")
-  async downloadFullArchive(@Res() res: Response) {
-    await this.setupService.streamFullArchive(res);
+  async downloadFullArchive(@Res() res: Response, @Req() req: Request) {
+    await this.audited(req, "BACKUP_ARCHIVE_DOWNLOAD", () => this.setupService.streamFullArchive(res));
   }
 
   /**
@@ -109,9 +130,9 @@ export class SetupController {
   @Roles("MANAGER")
   @Permissions("backup.access")
   @UseInterceptors(FileInterceptor("file", { storage: memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 * 1024 } }))
-  async restoreFromArchive(@UploadedFile() file: Express.Multer.File) {
+  async restoreFromArchive(@UploadedFile() file: Express.Multer.File, @Req() req: Request) {
     if (!file) throw new BadRequestException('Keine Datei hochgeladen');
-    await this.setupService.restoreFromArchive(file.buffer);
+    await this.audited(req, "BACKUP_RESTORE_ARCHIVE", () => this.setupService.restoreFromArchive(file.buffer));
     return { success: true, message: 'Archiv-Backup erfolgreich wiederhergestellt' };
   }
 
@@ -122,8 +143,8 @@ export class SetupController {
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("MANAGER")
   @Permissions("backup.access")
-  async downloadSqlDump(@Res({ passthrough: true }) res: Response) {
-    const sql = await this.setupService.createSqlDump();
+  async downloadSqlDump(@Res({ passthrough: true }) res: Response, @Req() req: Request) {
+    const sql = await this.audited(req, "BACKUP_SQL_DOWNLOAD", () => this.setupService.createSqlDump());
     const filename = `lagerverwaltung-dump-${new Date().toISOString().slice(0, 10)}.sql`;
     const buffer = Buffer.from(sql, 'utf-8');
     res.set({
@@ -189,8 +210,8 @@ export class SetupController {
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("MANAGER")
   @Permissions("backup.access")
-  async downloadAutoBackup(@Param('filename') filename: string, @Res() res: Response) {
-    const filepath = await this.setupService.getAutoBackupPath(filename);
+  async downloadAutoBackup(@Param('filename') filename: string, @Res() res: Response, @Req() req: Request) {
+    const filepath = await this.audited(req, "BACKUP_FILE_DOWNLOAD", () => this.setupService.getAutoBackupPath(filename));
     res.download(filepath);
   }
 
@@ -201,8 +222,8 @@ export class SetupController {
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("MANAGER")
   @Permissions("backup.access")
-  async deleteAutoBackup(@Param('filename') filename: string) {
-    await this.setupService.deleteAutoBackup(filename);
+  async deleteAutoBackup(@Param('filename') filename: string, @Req() req: Request) {
+    await this.audited(req, "BACKUP_DELETE", () => this.setupService.deleteAutoBackup(filename));
     return { success: true, message: 'Backup gelöscht' };
   }
 }

@@ -1,6 +1,7 @@
 import { ClassSerializerInterceptor, Logger, ValidationPipe } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { NestFactory } from "@nestjs/core";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import bodyParser from "body-parser";
 import compression from "compression";
 import cookieParser from "cookie-parser";
@@ -9,6 +10,7 @@ import helmet from "helmet";
 import { DataSource } from "typeorm";
 
 import { AppModule } from "./app.module";
+import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { SetupService } from "./modules/setup/setup.service";
 
 async function runFreshInstallMigrations(): Promise<void> {
@@ -53,7 +55,7 @@ async function runFreshInstallMigrations(): Promise<void> {
   }
 }
 
-async function runMigrationsWithBackup(app: Awaited<ReturnType<typeof NestFactory.create>>): Promise<void> {
+async function runMigrationsWithBackup(app: NestExpressApplication): Promise<void> {
   const logger = new Logger("MigrationBootstrap");
   const dataSource = app.get(DataSource);
 
@@ -102,7 +104,12 @@ async function runMigrationsWithBackup(app: Awaited<ReturnType<typeof NestFactor
     logger.log("Datenbankmigrationen erfolgreich abgeschlossen.");
   } catch (migrationErr) {
     logger.error("KRITISCH: Datenbankmigrationen fehlgeschlagen!", migrationErr);
-    logger.error("Die Anwendung startet trotzdem – bitte Backup zurückspielen und Migrationen prüfen.");
+    // Starting against a half-migrated schema risks data corruption, so fail fast unless explicitly overridden.
+    if (process.env.ALLOW_START_ON_MIGRATION_FAILURE === "true") {
+      logger.error("ALLOW_START_ON_MIGRATION_FAILURE=true – die Anwendung startet trotzdem. Bitte Backup zurückspielen und Migrationen prüfen.");
+      return;
+    }
+    throw migrationErr;
   }
 }
 
@@ -112,7 +119,11 @@ async function bootstrap() {
   await runFreshInstallMigrations();
 
   const requestLogger = new Logger("HTTP");
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Caddy sits in front: trust exactly N proxy hops so req.ip is the real client (throttler, audit logs).
+  const proxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS ?? "1", 10);
+  app.set("trust proxy", Number.isFinite(proxyHops) && proxyHops >= 0 ? proxyHops : 1);
 
   await runMigrationsWithBackup(app);
 
@@ -154,7 +165,7 @@ async function bootstrap() {
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error(`CORS: Origin '${origin}' nicht erlaubt`));
+        callback(null, false);
       }
     },
     credentials: true,
@@ -215,6 +226,8 @@ async function bootstrap() {
   // Globally exclude @Exclude()-annotated fields (e.g. passwordHash on User entity)
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
 
+  app.useGlobalFilters(new AllExceptionsFilter());
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -226,4 +239,7 @@ async function bootstrap() {
   await app.listen(port, "0.0.0.0");
 }
 
-void bootstrap();
+bootstrap().catch((error: unknown) => {
+  new Logger("Bootstrap").error("Start fehlgeschlagen", error instanceof Error ? error.stack : String(error));
+  process.exit(1);
+});

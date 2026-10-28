@@ -7,6 +7,7 @@ import { PermissionsGuard } from "../access-control/guards/permissions.guard";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
+import { VehiclesService } from "../vehicles/vehicles.service";
 
 import { CloneVehicleStockDto } from "./dto/clone-vehicle-stock.dto";
 import { RecordMovementDto } from "./dto/record-movement.dto";
@@ -17,6 +18,7 @@ import type { RestockRequestStatus } from "./entities/restock-request.entity";
 import { MovementQueryService } from "./movement-query.service";
 import { StockGateway } from "./stock.gateway";
 import { FleetOverviewResult, StockService } from "./stock.service";
+import { assertVehicleAccess } from "./vehicle-access";
 
 type HistoryMovementType = "CHECKIN" | "CHECKOUT";
 
@@ -28,6 +30,7 @@ export class StockController {
     private readonly stockService: StockService,
     private readonly stockGateway: StockGateway,
     private readonly movementQueryService: MovementQueryService,
+    private readonly vehiclesService: VehiclesService,
   ) {}
 
   @Get("dashboard")
@@ -62,15 +65,19 @@ export class StockController {
   }
 
   @Get("vehicle/:vehicleId")
-  getVehicleStock(@Req() req: Request, @Param("vehicleId") vehicleId: string) {
+  @Permissions("stock.read")
+  async getVehicleStock(@Req() req: Request, @Param("vehicleId") vehicleId: string) {
     const user = req.user;
     this.logger.debug(`getVehicleStock vehicleId=${vehicleId} user=${user?.username} userVehicleId=${user?.vehicleId} role=${user?.role}`);
+    await assertVehicleAccess(this.vehiclesService, user, vehicleId);
     return this.stockService.getVehicleStock(vehicleId);
   }
 
   @Get("vehicle/:vehicleId/shortages")
-  getVehicleShortages(@Param("vehicleId") vehicleId: string) {
+  @Permissions("stock.read")
+  async getVehicleShortages(@Req() req: Request, @Param("vehicleId") vehicleId: string) {
     this.logger.debug(`getVehicleShortages vehicleId=${vehicleId}`);
+    await assertVehicleAccess(this.vehiclesService, req.user, vehicleId);
     return this.stockService.getVehicleShortages(vehicleId);
   }
 
@@ -92,16 +99,20 @@ export class StockController {
   }
 
   @Patch("vehicle/:vehicleId/target")
+  @Permissions("stock.write")
   async updateTargetQuantity(@Req() req: Request, @Param("vehicleId") vehicleId: string, @Body() dto: UpdateTargetDto) {
+    await assertVehicleAccess(this.vehiclesService, req.user, vehicleId);
     const result = await this.stockService.updateTargetQuantity(vehicleId, dto, req.user?.id);
-    this.stockGateway.broadcastRestockUpdate();
+    this.stockGateway.broadcastRestockUpdate(req.user?.branchId);
     return result;
   }
 
   @Post("vehicle/:vehicleId/remove/:itemId")
+  @Permissions("stock.write")
   async removeFromVehicle(@Req() req: Request, @Param("vehicleId") vehicleId: string, @Param("itemId") itemId: string) {
+    await assertVehicleAccess(this.vehiclesService, req.user, vehicleId);
     const result = await this.stockService.removeFromVehicle(vehicleId, itemId, req.user?.id);
-    this.stockGateway.broadcastRestockUpdate();
+    this.stockGateway.broadcastRestockUpdate(req.user?.branchId);
     return result;
   }
 
@@ -117,8 +128,8 @@ export class StockController {
         }
       : undefined;
     const result = await this.stockService.updateRestockStatus(id, dto, actor);
-    this.stockGateway.broadcastRestockUpdate();
-    this.stockGateway.broadcastItemsUpdated();
+    this.stockGateway.broadcastRestockUpdate(user?.branchId);
+    this.stockGateway.broadcastItemsUpdated(user?.branchId);
     return result;
   }
 
@@ -139,8 +150,8 @@ export class StockController {
     }
     this.logger.log(`recordMovement vehicleId=${dto.vehicleId} itemId=${dto.itemId} type=${dto.type} qty=${dto.quantity} userId=${dto.userId}`);
     const result = await this.stockService.recordMovement(dto);
-    this.stockGateway.broadcastRestockUpdate();
-    this.stockGateway.broadcastItemsUpdated();
+    this.stockGateway.broadcastRestockUpdate(req.user?.branchId);
+    this.stockGateway.broadcastItemsUpdated(req.user?.branchId);
     return result;
   }
 
@@ -150,10 +161,10 @@ export class StockController {
   @Post("vehicle/clone")
   @Roles("MANAGER")
   @Permissions("stock.manage")
-  async cloneVehicleStock(@Body() dto: CloneVehicleStockDto) {
+  async cloneVehicleStock(@Body() dto: CloneVehicleStockDto, @Req() req: Request) {
     this.logger.log(`cloneVehicleStock source=${dto.sourceVehicleId} target=${dto.targetVehicleId}`);
     const result = await this.stockService.cloneVehicleStock(dto);
-    this.stockGateway.broadcastRestockUpdate();
+    this.stockGateway.broadcastRestockUpdate(req.user?.branchId);
     return result;
   }
 
@@ -253,8 +264,8 @@ export class StockController {
     }
     this.logger.log(`syncMovements count=${dto.movements?.length ?? 0}`);
     const result = await this.stockService.syncMovements(dto);
-    this.stockGateway.broadcastRestockUpdate();
-    this.stockGateway.broadcastItemsUpdated();
+    this.stockGateway.broadcastRestockUpdate(req.user?.branchId);
+    this.stockGateway.broadcastItemsUpdated(req.user?.branchId);
     return result;
   }
 

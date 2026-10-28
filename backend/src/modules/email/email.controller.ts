@@ -15,7 +15,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { LogCategory } from '../logging/entities/system-log.entity';
 import { LoggingService } from '../logging/services/logging.service';
 
-import { EmailService, EmailConfig } from './email.service';
+import { EmailConfigDto, PasswordResetRequestDto, TestEmailDto } from './dto/email.dto';
+import { EmailService } from './email.service';
 
 @Controller('email')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -36,17 +37,7 @@ export class EmailController {
 
   @Post('config')
   @Roles('MANAGER')
-  async setEmailConfig(@Body() config: EmailConfig, @Req() req: Request) {
-    if (!config.host || !config.port || !config.auth?.user || !config.auth?.pass || !config.from) {
-      throw new BadRequestException('Alle Felder sind erforderlich');
-    }
-    if (config.port < 1 || config.port > 65535) {
-      throw new BadRequestException('Port muss zwischen 1 und 65535 liegen');
-    }
-    if (!this.isValidEmail(config.from) || !this.isValidEmail(config.auth.user)) {
-      throw new BadRequestException('Ungültige Email-Adresse');
-    }
-
+  async setEmailConfig(@Body() config: EmailConfigDto, @Req() req: Request) {
     const branchId = req.user?.branchId ?? null;
 
     try {
@@ -75,11 +66,7 @@ export class EmailController {
 
   @Post('test')
   @Roles('MANAGER')
-  async sendTestEmail(@Body() body: { email: string }, @Req() req: Request) {
-    if (!body.email || !this.isValidEmail(body.email)) {
-      throw new BadRequestException('Gültige Email-Adresse erforderlich');
-    }
-
+  async sendTestEmail(@Body() body: TestEmailDto, @Req() req: Request) {
     const branchId = req.user?.branchId ?? null;
 
     try {
@@ -103,18 +90,10 @@ export class EmailController {
   }
 
   @Post('password-reset')
-  requestPasswordReset(@Body() body: { username: string }) {
-    if (!body.username) {
-      throw new BadRequestException('Benutzername erforderlich');
-    }
+  requestPasswordReset(@Body() body: PasswordResetRequestDto) {
     return {
       success: true,
       message: 'Falls der Benutzer existiert, wurde eine Passwort-Reset Email gesendet',
     };
-  }
-
-  private isValidEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
   }
 }

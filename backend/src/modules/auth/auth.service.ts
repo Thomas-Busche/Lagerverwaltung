@@ -76,7 +76,7 @@ export class AuthService {
     if (newCount >= AuthService.MAX_FAILED_ATTEMPTS) {
       const lockedUntil = new Date(Date.now() + AuthService.LOCKOUT_DURATION_MS);
       await this.userRepo.update(user.id, { failedLoginAttempts: 0, lockedUntil });
-      this.logger.warn(`Account-Lockout ausgelöst für "${username}" bis ${lockedUntil.toISOString()}.`);
+      this.logger.warn(`Account-Lockout ausgelöst für Benutzer ${user.id} bis ${lockedUntil.toISOString()}.`);
     } else {
       await this.userRepo.update(user.id, { failedLoginAttempts: newCount });
     }

@@ -4,13 +4,13 @@ import {
   Post,
   Query,
   UseGuards,
-  ForbiddenException,
   Request,
 } from "@nestjs/common";
 import { SkipThrottle } from "@nestjs/throttler";
 import type { Request as ExpressRequest } from "express";
 
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
+import { assertSuperAdmin } from "../users/utils/user-access.util";
 
 import { UpdateService, UpdateStatus } from "./update.service";
 
@@ -38,10 +38,8 @@ export class UpdateController {
   applyUpdate(
     @Request() req: ExpressRequest,
   ): { message: string } {
-    const user = req.user;
-    if (!user || user.role !== "MANAGER") {
-      throw new ForbiddenException("Nur Administratoren können Updates einspielen.");
-    }
+    // Updates the whole installation, so branch managers must not trigger it
+    assertSuperAdmin(req.user);
     return this.updateService.applyUpdate();
   }
 }

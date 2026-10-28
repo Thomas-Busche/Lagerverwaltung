@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { Request } from "express";
 
 import { Permissions } from "../access-control/decorators/permissions.decorator";
@@ -45,18 +45,23 @@ export class LocationsController {
   @Post()
   @Permissions("locations.create")
   create(@Body() dto: CreateLocationDto, @Req() req: Request) {
-    return this.locationsService.create({ ...dto, branchId: req.user?.branchId });
+    // Super-Admin (branchId=null im JWT) muss branchId explizit im Body angeben
+    if (req.user?.branchId === null && !dto.branchId) {
+      throw new BadRequestException("branchId ist erforderlich, wenn kein Branch-Kontext im Token vorhanden ist (Super-Admin)");
+    }
+    const branchId = req.user?.branchId !== null ? req.user?.branchId : dto.branchId;
+    return this.locationsService.create({ ...dto, branchId });
   }
 
   @Patch(":id")
   @Permissions("locations.edit")
-  update(@Param("id") id: string, @Body() dto: UpdateLocationDto) {
-    return this.locationsService.update(id, dto);
+  update(@Req() req: Request, @Param("id") id: string, @Body() dto: UpdateLocationDto) {
+    return this.locationsService.update(id, dto, req.user?.branchId);
   }
 
   @Delete(":id")
   @Permissions("locations.delete")
-  remove(@Param("id") id: string) {
-    return this.locationsService.remove(id);
+  remove(@Req() req: Request, @Param("id") id: string) {
+    return this.locationsService.remove(id, req.user?.branchId);
   }
 }

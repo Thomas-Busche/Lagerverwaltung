@@ -5,6 +5,7 @@ import type { Request, Response } from "express";
 import { AuthService } from "./auth.service";
 import { ChangePasswordDto } from "./dto/change-password.dto";
 import { LoginDto } from "./dto/login.dto";
+import { MfaDisableDto, MfaSetupTokenDto, MfaSetupVerifyDto, MfaTotpCodeDto, MfaVerifyDto } from "./dto/mfa.dto";
 import { RequestPasswordResetDto } from "./dto/request-password-reset.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
@@ -126,9 +127,11 @@ export class AuthController {
   }
 
   /** Step 2 of MFA login — exchange mfaToken + TOTP code for real tokens. */
+  // Max. 5 TOTP-Versuche pro 15 Minuten pro IP (Brute-Force-Schutz fuer 6-stellige Codes)
+  @Throttle({ default: { ttl: 900000, limit: 5 } })
   @Post("mfa/verify")
   async verifyMfaLogin(
-    @Body() body: { mfaToken: string; totpCode: string },
+    @Body() body: MfaVerifyDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -153,20 +156,22 @@ export class AuthController {
   /** Confirms TOTP code after scanning QR code and activates MFA. */
   @UseGuards(JwtAuthGuard)
   @Post("mfa/verify-setup")
-  async verifyMfaSetup(@Body() body: { totpCode: string }, @Req() req: Request) {
+  async verifyMfaSetup(@Body() body: MfaTotpCodeDto, @Req() req: Request) {
     return this.authService.verifyMfaSetup(this.extractUserId(req), body.totpCode);
   }
 
   /** MFA-Bootstrap Step 1: initiate setup using mfaSetupToken (no full JWT, for new admins). */
+  @Throttle({ default: { ttl: 900000, limit: 10 } })
   @Post("mfa/setup-init")
-  async setupMfaInit(@Body() body: { mfaSetupToken: string }) {
+  async setupMfaInit(@Body() body: MfaSetupTokenDto) {
     return this.authService.setupMfaViaSetupToken(body.mfaSetupToken);
   }
 
   /** MFA-Bootstrap Step 2: confirm TOTP + receive full auth tokens (no full JWT needed). */
+  @Throttle({ default: { ttl: 900000, limit: 5 } })
   @Post("mfa/verify-setup-init")
   async verifyMfaSetupInit(
-    @Body() body: { mfaSetupToken: string; totpCode: string },
+    @Body() body: MfaSetupVerifyDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -184,7 +189,7 @@ export class AuthController {
   /** Disables MFA (requires password confirmation). */
   @UseGuards(JwtAuthGuard)
   @Post("mfa/disable")
-  async disableMfa(@Body() body: { password: string }, @Req() req: Request) {
+  async disableMfa(@Body() body: MfaDisableDto, @Req() req: Request) {
     return this.authService.disableMfa(this.extractUserId(req), body.password);
   }
 

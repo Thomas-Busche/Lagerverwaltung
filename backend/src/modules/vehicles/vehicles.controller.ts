@@ -5,6 +5,8 @@ import { Permissions } from "../access-control/decorators/permissions.decorator"
 import { PermissionsGuard } from "../access-control/guards/permissions.guard";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 
+import { CreateVehicleDto } from "./dto/create-vehicle.dto";
+import { UpdateVehicleDto } from "./dto/update-vehicle.dto";
 import { Vehicle } from "./entities/vehicle.entity";
 import { VehiclesService } from "./vehicles.service";
 
@@ -27,13 +29,15 @@ export class VehiclesController {
 
   @Post()
   @Permissions("vehicles.create")
-  create(@Body() data: Pick<Vehicle, "licensePlate" | "description">, @Req() req: Request) {
-    return this.vehiclesService.create(data, req.user?.branchId);
+  create(@Body() data: CreateVehicleDto, @Req() req: Request) {
+    // Super-admin (branchId null in token) picks the target branch; everyone else is pinned to their own.
+    const branchId = req.user?.branchId ?? data.branchId ?? null;
+    return this.vehiclesService.create({ licensePlate: data.licensePlate, description: data.description }, branchId);
   }
 
   @Patch(":id")
   @Permissions("vehicles.edit")
-  update(@Req() req: Request, @Param("id") id: string, @Body() data: Partial<Vehicle>) {
+  update(@Req() req: Request, @Param("id") id: string, @Body() data: UpdateVehicleDto) {
     return this.vehiclesService.update(id, data, req.user?.branchId);
   }
 

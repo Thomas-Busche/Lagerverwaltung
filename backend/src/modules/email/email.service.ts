@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 
+import { escapeHtml } from '../../common/utils/html.util';
 import { LogCategory } from '../logging/entities/system-log.entity';
 import { LoggingService } from '../logging/services/logging.service';
 
@@ -199,9 +200,9 @@ export class EmailService {
       subject: 'Lagerverwaltung - Passwort zurücksetzen',
       html: `
         <h2>Passwort zurücksetzen</h2>
-        <p>Hallo <strong>${username}</strong>,</p>
+        <p>Hallo <strong>${escapeHtml(username)}</strong>,</p>
         <p>Sie haben eine Passwort-Zurücksetzung für Ihr Lagerverwaltung Konto angefordert.</p>
-        <p><a href="${resetUrl}" style="background-color: #1976d2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Passwort zurücksetzen</a></p>
+        <p><a href="${escapeHtml(resetUrl)}" style="background-color: #1976d2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Passwort zurücksetzen</a></p>
         <p>Dieser Link ist für <strong>1 Stunde</strong> gültig.</p>
         <hr>
         <p><small>Lagerverwaltung System</small></p>

@@ -3,6 +3,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 import AdmZip from "adm-zip";
 import { Repository } from "typeorm";
 
+import { escapeCsvCell } from "../../common/utils/csv.util";
 import { Item } from "../items/entities/item.entity";
 import { PurchaseOrderLine } from "../purchasing/entities/purchase-order-line.entity";
 import { PurchaseOrder } from "../purchasing/entities/purchase-order.entity";
@@ -291,8 +292,7 @@ function toCsv(columns: GdpduColumn[], rows: unknown[][]): string {
   const header = columns.map((c) => `"${c.name}"`).join(";");
   const dataRows = rows.map((row) =>
     row.map((cell) => {
-      const str = cell == null ? "" : String(cell);
-      return `"${str.replace(/"/g, '""')}"`;
+      return escapeCsvCell(cell);
     }).join(";"),
   );
   return [header, ...dataRows].join("\r\n");
