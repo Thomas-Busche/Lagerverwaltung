@@ -654,13 +654,19 @@ export class StockService {
     }
 
     if (requestedStatus === "FULFILLED") {
-      const pickupQuantity = previousProvided;
-      if (pickupQuantity <= 0) {
-        throw new BadRequestException("Es ist keine bereitgestellte Menge zum Abholen vorhanden.");
-      }
-
       const resolvedRequest = request;
-      const savedRequest = await this.dataSource.transaction(async (manager): Promise<RestockRequest> => {
+      await this.dataSource.transaction(async (manager): Promise<RestockRequest> => {
+        // Row lock serializes concurrent pickups: a second click waits here, then sees the
+        // already fulfilled state and is rejected instead of booking the same parts again.
+        const locked = await manager.findOne(RestockRequest, {
+          where: { id },
+          lock: { mode: "pessimistic_write" },
+        });
+        const pickupQuantity = Number(locked?.quantityProvided ?? 0);
+        if (!locked || locked.status !== "APPROVED" || pickupQuantity <= 0) {
+          throw new BadRequestException("Es ist keine bereitgestellte Menge zum Abholen vorhanden.");
+        }
+
         await this.recordMovement({
           itemId: resolvedRequest.item.id,
           vehicleId: resolvedRequest.vehicle.id,
@@ -672,25 +678,17 @@ export class StockService {
           source: `restock-pickup:${resolvedRequest.id}`,
         }, manager);
 
-        // Reloaden innerhalb der Transaktion, damit Status-Update und Reload atomar sind.
-        // Falls nicht gefunden: Fallback auf das bereits geladene request-Objekt.
-        const fresh: RestockRequest = (await this.reloadRestockRequest(id)) ?? request!;
-        const remainingPrepared = Math.max(
-          0,
-          Number(fresh.quantityProvided ?? previousProvided) - pickupQuantity,
-        );
-        fresh.quantityProvided = remainingPrepared;
-        fresh.note = dto.note?.trim() || fresh.note || null;
-        fresh.status = remainingPrepared > 0 ? "APPROVED" : "FULFILLED";
-        fresh.readyAt = fresh.status === "APPROVED" ? (fresh.readyAt ?? new Date()) : fresh.readyAt;
-        fresh.fulfilledAt = fresh.status === "FULFILLED" ? new Date() : null;
-        if (fresh.status !== "APPROVED") {
-          fresh.preparedBy = null;
-        }
-        return manager.save(fresh);
+        // recordMovement may have synced this request inside the transaction; the locked
+        // entity is re-read so the final state is written from the current row.
+        const current = (await manager.findOne(RestockRequest, { where: { id } })) ?? locked;
+        current.quantityProvided = 0;
+        current.status = "FULFILLED";
+        current.note = dto.note?.trim() || current.note || null;
+        current.fulfilledAt = new Date();
+        current.preparedBy = null;
+        return manager.save(current);
       });
-      request = savedRequest;
-      await this.syncRestockRequest(request.stockLevel.id);
+      await this.syncRestockRequest(resolvedRequest.stockLevel.id);
 
       const finalized = await this.reloadRestockRequest(id);
       if (!finalized) {

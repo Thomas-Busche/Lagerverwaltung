@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Autocomplete } from "@mui/material";
 import type { ChipProps } from "@mui/material/Chip";
 import {
@@ -85,6 +85,9 @@ const DashboardRestockWidget: React.FC = () => {
   const [stock, setStock] = useState<StockLevelDto[]>([]);
   const [isLoadingStock, setLoadingStock] = useState(false);
   const [stockRefreshKey, setStockRefreshKey] = useState(0);
+
+  const [receivingIds, setReceivingIds] = useState<Set<string>>(new Set());
+  const receivingRef = useRef<Set<string>>(new Set());
 
   const refreshStock = () => setStockRefreshKey((k) => k + 1);
 
@@ -203,6 +206,30 @@ const DashboardRestockWidget: React.FC = () => {
       }),
     [stock, myRequests],
   );
+
+  const confirmReceipt = async (requestId: string, itemId: string) => {
+    // The ref blocks double taps before React re-renders; the state disables the button.
+    if (receivingRef.current.has(requestId)) return;
+    receivingRef.current.add(requestId);
+    setReceivingIds(new Set(receivingRef.current));
+    try {
+      await updateStatus(requestId, { status: "FULFILLED" });
+      markReadByItemId(itemId);
+      if (vehicleId) {
+        void useRestockStore.getState().loadForVehicle(vehicleId);
+      }
+      refreshStock();
+    } catch (error) {
+      console.error("Erhalten-Bestaetigung fehlgeschlagen:", error);
+      if (vehicleId) {
+        void useRestockStore.getState().loadForVehicle(vehicleId);
+      }
+      refreshStock();
+    } finally {
+      receivingRef.current.delete(requestId);
+      setReceivingIds(new Set(receivingRef.current));
+    }
+  };
 
   const handleQuantityChange = (requestId: string, value: string) => {
     const numValue = parseInt(value) || 0;
@@ -628,23 +655,9 @@ const DashboardRestockWidget: React.FC = () => {
                               color="success"
                               size="small"
                               fullWidth
-                              disabled={provided <= 0}
+                              disabled={provided <= 0 || (req ? receivingIds.has(req.id) : false)}
                               onClick={() => {
-                                if (!req) return;
-                                void (async () => {
-                                  try {
-                                    await updateStatus(req.id, { status: "FULFILLED" });
-                                    markReadByItemId(entry.item.id);
-                                    if (vehicleId) {
-                                      const loadForVehicle =
-                                        useRestockStore.getState().loadForVehicle;
-                                      void loadForVehicle(vehicleId);
-                                    }
-                                    refreshStock();
-                                  } catch {
-                                    // Fehlerbehandlung
-                                  }
-                                })();
+                                if (req) void confirmReceipt(req.id, entry.item.id);
                               }}
                             >
                               Erhalten
@@ -674,23 +687,9 @@ const DashboardRestockWidget: React.FC = () => {
                               variant="contained"
                               color="success"
                               size="small"
-                              disabled={provided <= 0}
+                              disabled={provided <= 0 || (req ? receivingIds.has(req.id) : false)}
                               onClick={() => {
-                                if (!req) return;
-                                void (async () => {
-                                  try {
-                                    await updateStatus(req.id, { status: "FULFILLED" });
-                                    markReadByItemId(entry.item.id);
-                                    if (vehicleId) {
-                                      const loadForVehicle =
-                                        useRestockStore.getState().loadForVehicle;
-                                      void loadForVehicle(vehicleId);
-                                    }
-                                    refreshStock();
-                                  } catch {
-                                    // Fehlerbehandlung
-                                  }
-                                })();
+                                if (req) void confirmReceipt(req.id, entry.item.id);
                               }}
                             >
                               Erhalten
