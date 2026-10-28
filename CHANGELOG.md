@@ -5,6 +5,15 @@ Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.0.0
 
 ---
 
+## [4.7.7] – 2026-10-28 · Keine 401-Fehlalarme mehr im Systemprotokoll
+
+> **Hintergrund:** Läuft der Zugriffstoken ab, schicken Seiten mehrere Anfragen parallel los und bekommen alle ein 401. Die App erneuert den Token automatisch und wiederholt die Anfragen, trotzdem stand jedes 401 vorher als ERROR im Protokoll (im Export vom 28.10. über 700 Einträge allein für `users/me/settings`).
+
+### Bugfix
+- 401-Antworten, die automatisch per Token-Refresh wiederholt werden, werden nicht mehr als Fehler geloggt. Geloggt wird nur, wenn eine Anfrage endgültig scheitert (inkl. fehlgeschlagenem Refresh).
+
+---
+
 ## [4.7.6] – 2026-09-28 · In-App-Update: echter Fehlergrund sichtbar statt "kurz was, dann nichts"
 
 > **Hintergrund:** Beim In-App-Update schlug der Neustart-Schritt fehl, aber im Update-Log war davon nichts zu sehen – nur ganz kurz blitzte etwas auf, dann blieb das Log leer. Ursache: Der Neustart-Helfer-Container lief komplett "fire-and-forget" (`docker run -d`), seine eigene Ausgabe (die tatsächliche Fehlermeldung) wurde nie eingesammelt.

@@ -61,18 +61,25 @@ api.interceptors.response.use(
     const config = error.config as any;
     const duration = Date.now() - (config?.metadata?.startTime || 0);
     
-    // Async logging ohne await (non-blocking)
-    logApiCall(
-      config?.method?.toUpperCase() || 'UNKNOWN',
-      config?.url || '',
-      error.response?.status || 0,
-      duration,
-      error
-    ).catch(err => console.warn('[API] Logging failed:', err));
-
     const status = error?.response?.status;
     const isAuthEndpoint = config?.url?.includes("/auth/login") || config?.url?.includes("/auth/refresh");
-    if (status === 401 && !config?._retry && !isAuthEndpoint) {
+    const willRetryAfterRefresh = status === 401 && !config?._retry && !isAuthEndpoint;
+
+    // Ein abgelaufener Access-Token (401) wird gleich per Refresh erneuert und die
+    // Anfrage wiederholt - das ist Normalbetrieb und kein Fehler fuers Systemprotokoll.
+    // Mehrere parallele Anfragen erzeugten sonst pro Token-Ablauf eine ERROR-Salve.
+    if (!willRetryAfterRefresh) {
+      // Async logging ohne await (non-blocking)
+      logApiCall(
+        config?.method?.toUpperCase() || 'UNKNOWN',
+        config?.url || '',
+        error.response?.status || 0,
+        duration,
+        error
+      ).catch(err => console.warn('[API] Logging failed:', err));
+    }
+
+    if (willRetryAfterRefresh) {
       config._retry = true;
       try {
         refreshPromise = refreshPromise || refreshAccessToken();
