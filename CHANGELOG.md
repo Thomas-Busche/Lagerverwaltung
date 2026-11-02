@@ -5,6 +5,17 @@ Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.0.0
 
 ---
 
+## [4.8.1] – 2026-11-02 · Bereitstellen/Rückgängig im Teilelager gegen Mehrfachklicks abgesichert
+
+> **Hintergrund:** Im Dump vom 02.11. zeigte die Bewegungshistorie neun Buchungen binnen 20 Sekunden für denselben Artikel (5× „Bereitstellung", 4× „Bereitstellung-Ruecknahme", netto korrekt). Die Buttons im Teilelager-Dashboard waren während der Anfrage nicht gesperrt und gaben kein Feedback, es wurde mehrfach geklickt (6 Status-Anfragen in 4 Sekunden). „Bereitstellung reduziert/storniert" ist die Gegenbuchung, die die Teile bei „Rückgängig" oder reduzierter Menge ins Teilelager zurückbucht.
+
+### Bugfix
+- **Bereitstellen/Rückgängig serverseitig serialisiert:** Die Anfrage wird in der Transaktion gesperrt, die Bestandsbuchung läuft in derselben Transaktion, und die Differenz wird aus der gespeicherten Menge berechnet statt aus einem veralteten Lesestand. Gleichzeitige Klicks können Teile nicht mehr doppelt aus dem Teilelager ausbuchen oder doppelt zurückbuchen. Sperrreihenfolge (erst Fahrzeugbestand, dann Anfrage) entspricht den normalen Buchungen, damit keine Deadlocks entstehen.
+- **Dashboard (Teilelager):** Die Aktionen Bereitstellen, Alles, Rückgängig, Abschließen und das Mengenfeld sind pro Anfrage gesperrt, solange die Anfrage läuft.
+- Regressionstests: sechs parallele Klicks buchen genau einmal; Bereitstellen und Rückgängig im Wechsel ergeben einen ausgeglichenen Bestand.
+
+---
+
 ## [4.8.0] – 2026-10-28 · Sicherheits-Release (Re-Audit) + Fix doppelte „Erhalten"-Buchung
 
 > **Hintergrund:** Teile, die ein Techniker über das Dashboard mit „Erhalten" übernahm, blieben im Teilelager teils als „bereitgestellt" stehen, während sie beim Techniker verschwanden. Ursache: Mehrfach-Klicks buchten dieselbe Bereitstellung mehrfach ein (im Datenbestand 6 Einbuchungen binnen 24 s), der Ist-Bestand lag dadurch über dem Soll und die Anfrage blieb offen. Zusätzlich wurde ein Sicherheits-Re-Audit durchgeführt und umgesetzt.

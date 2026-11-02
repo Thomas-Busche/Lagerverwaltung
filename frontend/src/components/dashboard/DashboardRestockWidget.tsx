@@ -86,8 +86,8 @@ const DashboardRestockWidget: React.FC = () => {
   const [isLoadingStock, setLoadingStock] = useState(false);
   const [stockRefreshKey, setStockRefreshKey] = useState(0);
 
-  const [receivingIds, setReceivingIds] = useState<Set<string>>(new Set());
-  const receivingRef = useRef<Set<string>>(new Set());
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const busyRef = useRef<Set<string>>(new Set());
 
   const refreshStock = () => setStockRefreshKey((k) => k + 1);
 
@@ -207,29 +207,55 @@ const DashboardRestockWidget: React.FC = () => {
     [stock, myRequests],
   );
 
-  const confirmReceipt = async (requestId: string, itemId: string) => {
-    // The ref blocks double taps before React re-renders; the state disables the button.
-    if (receivingRef.current.has(requestId)) return;
-    receivingRef.current.add(requestId);
-    setReceivingIds(new Set(receivingRef.current));
+  // Every booking action of one request runs exclusively. The ref blocks double clicks
+  // before React re-renders; the state disables the buttons while the request is running.
+  const runExclusive = async (requestId: string, action: () => Promise<void>) => {
+    if (busyRef.current.has(requestId)) return;
+    busyRef.current.add(requestId);
+    setBusyIds(new Set(busyRef.current));
     try {
-      await updateStatus(requestId, { status: "FULFILLED" });
-      markReadByItemId(itemId);
-      if (vehicleId) {
-        void useRestockStore.getState().loadForVehicle(vehicleId);
-      }
-      refreshStock();
-    } catch (error) {
-      console.error("Erhalten-Bestaetigung fehlgeschlagen:", error);
-      if (vehicleId) {
-        void useRestockStore.getState().loadForVehicle(vehicleId);
-      }
-      refreshStock();
+      await action();
     } finally {
-      receivingRef.current.delete(requestId);
-      setReceivingIds(new Set(receivingRef.current));
+      busyRef.current.delete(requestId);
+      setBusyIds(new Set(busyRef.current));
     }
   };
+
+  const confirmReceipt = (requestId: string, itemId: string) =>
+    runExclusive(requestId, async () => {
+      try {
+        await updateStatus(requestId, { status: "FULFILLED" });
+        markReadByItemId(itemId);
+      } catch (error) {
+        console.error("Erhalten-Bestaetigung fehlgeschlagen:", error);
+      }
+      if (vehicleId) {
+        void useRestockStore.getState().loadForVehicle(vehicleId);
+      }
+      refreshStock();
+    });
+
+  const showBookingError = (prefix: string, error: unknown) => {
+    const apiError = toApiError(error);
+    const details = apiError.response?.data
+      ? JSON.stringify(apiError.response.data)
+      : (apiError.message ?? "Unbekannter Fehler");
+    alert(`${prefix}: ${details}`);
+  };
+
+  const changeProvision = (
+    requestId: string,
+    payload: Parameters<typeof updateStatus>[1],
+    errorPrefix?: string,
+  ) =>
+    runExclusive(requestId, async () => {
+      try {
+        await updateStatus(requestId, payload);
+        setTimeout(() => void loadFleet("OPEN"), 500);
+      } catch (error: unknown) {
+        if (errorPrefix) showBookingError(errorPrefix, error);
+      }
+    });
 
   const handleQuantityChange = (requestId: string, value: string) => {
     const numValue = parseInt(value) || 0;
@@ -254,17 +280,15 @@ const DashboardRestockWidget: React.FC = () => {
       }`,
     };
 
-    try {
-      await updateStatus(request.id, payload);
-      setQuantityInputs((prev) => ({ ...prev, [request.id]: 0 }));
-      setTimeout(() => void loadFleet("OPEN"), 500);
-    } catch (error: unknown) {
-      const apiError = toApiError(error);
-      const details = apiError.response?.data
-        ? JSON.stringify(apiError.response.data)
-        : (apiError.message ?? "Unbekannter Fehler");
-      alert(`Fehler beim Bereitstellen: ${details}`);
-    }
+    await runExclusive(request.id, async () => {
+      try {
+        await updateStatus(request.id, payload);
+        setQuantityInputs((prev) => ({ ...prev, [request.id]: 0 }));
+        setTimeout(() => void loadFleet("OPEN"), 500);
+      } catch (error: unknown) {
+        showBookingError("Fehler beim Bereitstellen", error);
+      }
+    });
   };
 
   const getFleetStatusForRequest = (
@@ -445,6 +469,7 @@ const DashboardRestockWidget: React.FC = () => {
                         variant="contained"
                         color="primary"
                         disabled={
+                          busyIds.has(request.id) ||
                           !quantityInputs[request.id] ||
                           quantityInputs[request.id] <= 0 ||
                           quantityInputs[request.id] > needed - provided
@@ -458,25 +483,18 @@ const DashboardRestockWidget: React.FC = () => {
                         size="small"
                         variant="outlined"
                         color="success"
-                        onClick={() => {
-                          void (async () => {
-                            const payload = {
+                        disabled={busyIds.has(request.id)}
+                        onClick={() =>
+                          void changeProvision(
+                            request.id,
+                            {
                               status: "APPROVED" as RestockRequestStatus,
                               quantityProvided: needed,
                               note: `Bereitgestellt: ${needed}/${needed} (Komplett)`,
-                            };
-                            try {
-                              await updateStatus(request.id, payload);
-                              setTimeout(() => void loadFleet("OPEN"), 500);
-                            } catch (error: unknown) {
-                              const apiError = toApiError(error);
-                              const details = apiError.response?.data
-                                ? JSON.stringify(apiError.response.data)
-                                : (apiError.message ?? "Unbekannter Fehler");
-                              alert(`Fehler beim kompletten Bereitstellen: ${details}`);
-                            }
-                          })();
-                        }}
+                            },
+                            "Fehler beim kompletten Bereitstellen",
+                          )
+                        }
                         sx={{ fontSize: "0.7rem", px: 1, py: 0.5 }}
                       >
                         Alles ({needed - provided})
@@ -495,7 +513,7 @@ const DashboardRestockWidget: React.FC = () => {
                   max={needed}
                   value={provided}
                   style={{ width: 60 }}
-                  disabled={request.status === "FULFILLED"}
+                  disabled={request.status === "FULFILLED" || busyIds.has(request.id)}
                   onChange={(e) => {
                     void (async () => {
                       const value = Number(e.target.value);
@@ -517,12 +535,7 @@ const DashboardRestockWidget: React.FC = () => {
                                 : ""
                           }`,
                         };
-                        try {
-                          await updateStatus(request.id, payload);
-                          setTimeout(() => void loadFleet("OPEN"), 500);
-                        } catch {
-                          // Fehlerbehandlung
-                        }
+                        await changeProvision(request.id, payload);
                       }
                     })();
                   }}
@@ -542,8 +555,9 @@ const DashboardRestockWidget: React.FC = () => {
                   size="small"
                   variant="outlined"
                   color="error"
+                  disabled={busyIds.has(request.id)}
                   onClick={() =>
-                    void updateStatus(request.id, { status: "PENDING", quantityProvided: 0 })
+                    void changeProvision(request.id, { status: "PENDING", quantityProvided: 0 })
                   }
                 >
                   Rückgängig
@@ -554,8 +568,9 @@ const DashboardRestockWidget: React.FC = () => {
                   size="small"
                   variant="contained"
                   color="success"
+                  disabled={busyIds.has(request.id)}
                   onClick={() =>
-                    void updateStatus(request.id, {
+                    void changeProvision(request.id, {
                       status: "APPROVED",
                       quantityProvided: provided,
                     })
@@ -655,7 +670,7 @@ const DashboardRestockWidget: React.FC = () => {
                               color="success"
                               size="small"
                               fullWidth
-                              disabled={provided <= 0 || (req ? receivingIds.has(req.id) : false)}
+                              disabled={provided <= 0 || (req ? busyIds.has(req.id) : false)}
                               onClick={() => {
                                 if (req) void confirmReceipt(req.id, entry.item.id);
                               }}
@@ -687,7 +702,7 @@ const DashboardRestockWidget: React.FC = () => {
                               variant="contained"
                               color="success"
                               size="small"
-                              disabled={provided <= 0 || (req ? receivingIds.has(req.id) : false)}
+                              disabled={provided <= 0 || (req ? busyIds.has(req.id) : false)}
                               onClick={() => {
                                 if (req) void confirmReceipt(req.id, entry.item.id);
                               }}

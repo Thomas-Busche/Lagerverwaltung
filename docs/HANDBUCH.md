@@ -330,6 +330,8 @@ Zeigt alle Fahrzeuge mit aktuellem Bestand. Klick auf ein Fahrzeug öffnet die D
 
 Techniker sehen hier ihren persönlichen Fahrzeugbestand. Fehlbestände können direkt als Nachbestellung gemeldet werden. Techniker können nur ihr eigenes Fahrzeug einsehen und buchen (seit v4.8 auch serverseitig erzwungen).
 
+**Bereitstellen im Teilelager (ab v4.8.1):** Bereitstellen, „Alles", „Rückgängig" und „Abschließen" buchen den Bestand im Teilelager. Beim Bereitstellen werden die Teile ausgebucht („Bereitstellung"), bei „Rückgängig" oder einer verringerten Menge kommen sie als „Bereitstellung reduziert/storniert" (Quelle: Bereitstellung-Ruecknahme) zurück ins Teilelager. Das ist so gewollt und kein Fehler. Während eine Aktion läuft, sind die Buttons der Anfrage gesperrt; mehrfaches Klicken erzeugt keine zusätzlichen Buchungen mehr. Die Bewegungshistorie zeigt weiterhin jede einzelne Bereitstellung und Rücknahme.
+
 **Bereitgestellte Teile übernehmen („Erhalten"):** Hat das Teilelager Teile bereitgestellt, bestätigt der Techniker die Abholung im Dashboard mit **Erhalten**. Die Buchung ins Fahrzeug erfolgt genau einmal; der Button ist während der Buchung gesperrt, und ein wiederholter Klick oder Netzwerk-Retry bucht nichts doppelt (bis v4.7 konnte das den Ist-Bestand über den Soll-Wert erhöhen und die Anfrage im Teilelager offen lassen).
 
 **Bestand prüfen (Scan):** Der Modus-Umschalter oben bietet neben Ein-/Ausbuchen auch „Bestand prüfen". Scanner starten → Artikel scannen → Fahrzeugbestand wird sofort angezeigt, ohne zu buchen. Nützlich um schnell nachzusehen wie viele Stück eines Teils noch im Wagen sind.

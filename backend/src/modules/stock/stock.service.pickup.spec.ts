@@ -12,12 +12,29 @@ interface FakeRestockRow {
   id: string;
   status: "PENDING" | "APPROVED" | "FULFILLED" | "CANCELLED";
   quantityProvided: number;
+  quantityNeeded: number;
   note: string | null;
+  readyAt: Date | null;
   fulfilledAt: Date | null;
   preparedBy: unknown;
+  location: unknown;
 }
 
 const REQUEST_ID = "request-1";
+const WAREHOUSE_LOCATION = { id: "warehouse-1" };
+
+const createRow = (overrides: Partial<FakeRestockRow> = {}): FakeRestockRow => ({
+  id: REQUEST_ID,
+  status: "APPROVED",
+  quantityProvided: 1,
+  quantityNeeded: 1,
+  note: null,
+  readyAt: null,
+  fulfilledAt: null,
+  preparedBy: null,
+  location: WAREHOUSE_LOCATION,
+  ...overrides,
+});
 
 // Simulates InnoDB row locking: transactions touching the row run strictly one after another.
 const createSerializingDataSource = (row: FakeRestockRow) => {
@@ -38,20 +55,25 @@ const createSerializingDataSource = (row: FakeRestockRow) => {
   };
 };
 
-const buildService = (row: FakeRestockRow) => {
+const buildService = (row: FakeRestockRow, permissions: string[]) => {
   const loadedRequest = {
     id: REQUEST_ID,
-    status: "APPROVED",
-    quantityProvided: 1,
-    quantityNeeded: 1,
-    item: { id: "item-1" },
-    vehicle: { id: "vehicle-1" },
+    status: row.status,
+    quantityProvided: row.quantityProvided,
+    quantityNeeded: row.quantityNeeded,
+    item: { id: "item-1", code: "ITEM", description: "Test" },
+    vehicle: { id: "vehicle-1", licensePlate: "H-RR 1965", branchId: "branch-1" },
     stockLevel: { id: "stock-level-1" },
+    location: WAREHOUSE_LOCATION,
     preparedBy: null,
   };
   const restockRepository = { findOne: jest.fn(async () => loadedRequest) };
   const accessControlService = {
-    getEffectivePermissionsForUserId: jest.fn(async () => ({ permissions: ["stock.write"] })),
+    getEffectivePermissionsForUserId: jest.fn(async () => ({ permissions })),
+  };
+  const usersService = {
+    findOneById: jest.fn(async () => ({ id: "user-1" })),
+    findAll: jest.fn(async () => []),
   };
   const dataSource = createSerializingDataSource(row);
 
@@ -62,7 +84,7 @@ const buildService = (row: FakeRestockRow) => {
     {} as never,
     {} as never,
     accessControlService as never,
-    {} as never,
+    usersService as never,
     {} as never,
     {} as never,
     {} as never,
@@ -78,26 +100,20 @@ const buildService = (row: FakeRestockRow) => {
   internals.logRestockRequest = jest.fn(async () => undefined);
   internals.getWarehouseAvailabilityByItemIds = jest.fn(async () => new Map());
   internals.mapRestockRequest = jest.fn(() => ({ id: REQUEST_ID }));
+  internals.resolveRestockSourceLocation = jest.fn(async () => WAREHOUSE_LOCATION);
 
   return { service, recordMovement };
 };
 
 describe("StockService restock pickup (Erhalten)", () => {
-  const actor = { id: "technician-1", role: "TECHNICIAN", vehicleId: "vehicle-1" };
+  const technician = { id: "technician-1", role: "TECHNICIAN", vehicleId: "vehicle-1" };
 
   it("books a provided quantity exactly once when 'Erhalten' is triggered concurrently", async () => {
-    const row: FakeRestockRow = {
-      id: REQUEST_ID,
-      status: "APPROVED",
-      quantityProvided: 1,
-      note: null,
-      fulfilledAt: null,
-      preparedBy: null,
-    };
-    const { service, recordMovement } = buildService(row);
+    const row = createRow();
+    const { service, recordMovement } = buildService(row, ["stock.write"]);
 
     const results = await Promise.allSettled(
-      Array.from({ length: 6 }, () => service.updateRestockStatus(REQUEST_ID, { status: "FULFILLED" }, actor)),
+      Array.from({ length: 6 }, () => service.updateRestockStatus(REQUEST_ID, { status: "FULFILLED" }, technician)),
     );
 
     const fulfilled = results.filter((result) => result.status === "fulfilled");
@@ -116,19 +132,79 @@ describe("StockService restock pickup (Erhalten)", () => {
   });
 
   it("rejects a pickup when nothing is provided any more", async () => {
-    const row: FakeRestockRow = {
-      id: REQUEST_ID,
-      status: "FULFILLED",
-      quantityProvided: 0,
-      note: null,
-      fulfilledAt: new Date(),
-      preparedBy: null,
-    };
-    const { service, recordMovement } = buildService(row);
+    const row = createRow({ status: "FULFILLED", quantityProvided: 0, fulfilledAt: new Date() });
+    const { service, recordMovement } = buildService(row, ["stock.write"]);
 
-    await expect(service.updateRestockStatus(REQUEST_ID, { status: "FULFILLED" }, actor)).rejects.toBeInstanceOf(
+    await expect(service.updateRestockStatus(REQUEST_ID, { status: "FULFILLED" }, technician)).rejects.toBeInstanceOf(
       BadRequestException,
     );
+    expect(recordMovement).not.toHaveBeenCalled();
+  });
+});
+
+describe("StockService restock provisioning (Bereitstellen / Rückgängig)", () => {
+  const warehouse = { id: "warehouse-user-1", role: "WAREHOUSE", vehicleId: null };
+  const provide = { status: "APPROVED" as const, quantityProvided: 1 };
+
+  it("books the warehouse stock out only once when 'Bereitstellen' is clicked repeatedly", async () => {
+    const row = createRow({ status: "PENDING", quantityProvided: 0 });
+    const { service, recordMovement } = buildService(row, ["restock.manage"]);
+
+    await Promise.all(Array.from({ length: 6 }, () => service.updateRestockStatus(REQUEST_ID, provide, warehouse)));
+
+    expect(recordMovement).toHaveBeenCalledTimes(1);
+    expect(recordMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "CHECKOUT", quantity: 1, source: "Bereitstellung" }),
+      expect.anything(),
+    );
+    expect(row.status).toBe("APPROVED");
+    expect(row.quantityProvided).toBe(1);
+  });
+
+  it("returns the parts to the warehouse once when 'Rückgängig' is clicked repeatedly", async () => {
+    const row = createRow({ status: "APPROVED", quantityProvided: 1 });
+    const { service, recordMovement } = buildService(row, ["restock.manage"]);
+
+    await Promise.all(
+      Array.from({ length: 6 }, () =>
+        service.updateRestockStatus(REQUEST_ID, { status: "PENDING", quantityProvided: 0 }, warehouse),
+      ),
+    );
+
+    expect(recordMovement).toHaveBeenCalledTimes(1);
+    expect(recordMovement).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "CHECKIN", quantity: 1, source: "Bereitstellung-Ruecknahme" }),
+      expect.anything(),
+    );
+    expect(row.status).toBe("PENDING");
+    expect(row.quantityProvided).toBe(0);
+  });
+
+  it("keeps the warehouse stock balanced when provisioning and undoing alternate", async () => {
+    const row = createRow({ status: "PENDING", quantityProvided: 0 });
+    const { service, recordMovement } = buildService(row, ["restock.manage"]);
+
+    for (let round = 0; round < 3; round += 1) {
+      await service.updateRestockStatus(REQUEST_ID, provide, warehouse);
+      await service.updateRestockStatus(REQUEST_ID, { status: "PENDING", quantityProvided: 0 }, warehouse);
+    }
+    await service.updateRestockStatus(REQUEST_ID, provide, warehouse);
+
+    const balance = recordMovement.mock.calls.reduce(
+      (sum, [movement]) => sum + (movement.type === "CHECKOUT" ? -movement.quantity : movement.quantity),
+      0,
+    );
+    expect(balance).toBe(-1);
+    expect(row.quantityProvided).toBe(1);
+  });
+
+  it("rejects a provided quantity above the shortage", async () => {
+    const row = createRow({ status: "PENDING", quantityProvided: 0, quantityNeeded: 1 });
+    const { service, recordMovement } = buildService(row, ["restock.manage"]);
+
+    await expect(
+      service.updateRestockStatus(REQUEST_ID, { status: "APPROVED", quantityProvided: 2 }, warehouse),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(recordMovement).not.toHaveBeenCalled();
   });
 });

@@ -633,18 +633,13 @@ export class StockService {
     dto: UpdateRestockStatusDto,
     actor?: RestockActorContext,
   ): Promise<RestockRequestView> {
-    let request = await this.reloadRestockRequest(id);
+    const request = await this.reloadRestockRequest(id);
     if (!request) {
       throw new NotFoundException("Restock request not found");
     }
 
     await this.assertRestockMutationAllowed(request, dto, actor);
 
-    const previousStatus = request.status;
-    const previousProvided = Number(request.quantityProvided ?? 0);
-    const requestedProvided = typeof dto.quantityProvided === "number"
-      ? Math.max(0, Math.floor(dto.quantityProvided))
-      : previousProvided;
     const requestedStatus = dto.status;
 
     let preparedBy = request.preparedBy ?? null;
@@ -664,10 +659,7 @@ export class StockService {
       await this.dataSource.transaction(async (manager): Promise<RestockRequest> => {
         // Row lock serializes concurrent pickups: a second click waits here, then sees the
         // already fulfilled state and is rejected instead of booking the same parts again.
-        const locked = await manager.findOne(RestockRequest, {
-          where: { id },
-          lock: { mode: "pessimistic_write" },
-        });
+        const locked = await this.lockRestockRequest(manager, id, resolvedRequest.stockLevel.id);
         const pickupQuantity = Number(locked?.quantityProvided ?? 0);
         if (!locked || locked.status !== "APPROVED" || pickupQuantity <= 0) {
           throw new BadRequestException("Es ist keine bereitgestellte Menge zum Abholen vorhanden.");
@@ -709,58 +701,76 @@ export class StockService {
       return this.mapRestockRequest(finalized, warehouseAvailability);
     }
 
-    const effectiveStatus: RestockRequestStatus =
-      requestedStatus === "CANCELLED"
-        ? "CANCELLED"
-        : requestedProvided > 0
-          ? "APPROVED"
-          : "PENDING";
-    const targetProvided = effectiveStatus === "CANCELLED" ? 0 : requestedProvided;
-    if (targetProvided > request.quantityNeeded) {
-      throw new BadRequestException("Bereitgestellte Menge darf den Fehlbestand nicht uebersteigen.");
-    }
-
     const sourceLocation = await this.resolveRestockSourceLocation(request, dto.locationId);
-    if (
-      previousProvided > 0
-      && targetProvided === previousProvided
-      && request.location?.id
-      && sourceLocation?.id
-      && request.location.id !== sourceLocation.id
-    ) {
-      throw new BadRequestException(
-        "Lagerortwechsel bei bereits bereitgestellter Menge nur mit Mengenanpassung erlaubt.",
+    const resolvedRequest = request;
+
+    // The row lock makes concurrent clicks run one after another; each of them then
+    // computes its delta from the committed quantity instead of a stale read, so parts
+    // are neither booked out twice nor returned twice.
+    const { previousStatus, previousProvided } = await this.dataSource.transaction(async (manager) => {
+      const locked = await this.lockRestockRequest(manager, id, resolvedRequest.stockLevel.id);
+      if (!locked) {
+        throw new NotFoundException("Restock request not found");
+      }
+
+      const currentProvided = Number(locked.quantityProvided ?? 0);
+      const requestedProvided = typeof dto.quantityProvided === "number"
+        ? Math.max(0, Math.floor(dto.quantityProvided))
+        : currentProvided;
+      const effectiveStatus: RestockRequestStatus =
+        requestedStatus === "CANCELLED"
+          ? "CANCELLED"
+          : requestedProvided > 0
+            ? "APPROVED"
+            : "PENDING";
+      const targetProvided = effectiveStatus === "CANCELLED" ? 0 : requestedProvided;
+      if (targetProvided > locked.quantityNeeded) {
+        throw new BadRequestException("Bereitgestellte Menge darf den Fehlbestand nicht uebersteigen.");
+      }
+      if (
+        currentProvided > 0
+        && targetProvided === currentProvided
+        && resolvedRequest.location?.id
+        && sourceLocation?.id
+        && resolvedRequest.location.id !== sourceLocation.id
+      ) {
+        throw new BadRequestException(
+          "Lagerortwechsel bei bereits bereitgestellter Menge nur mit Mengenanpassung erlaubt.",
+        );
+      }
+
+      await this.applyPreparedQuantityDelta(
+        resolvedRequest,
+        currentProvided,
+        targetProvided,
+        sourceLocation,
+        actor?.id ?? undefined,
+        manager,
       );
-    }
-    await this.applyPreparedQuantityDelta(
-      request,
-      previousProvided,
-      targetProvided,
-      sourceLocation,
-      actor?.id ?? undefined,
-    );
 
-    request = (await this.reloadRestockRequest(id)) ?? request;
-    request.quantityProvided = targetProvided;
-    request.status = effectiveStatus;
-    request.location = sourceLocation;
-    request.note = dto.note?.trim() || null;
+      const before = { previousStatus: locked.status, previousProvided: currentProvided };
+      locked.quantityProvided = targetProvided;
+      locked.status = effectiveStatus;
+      locked.location = sourceLocation;
+      locked.note = dto.note?.trim() || null;
 
-    if (effectiveStatus === "APPROVED" && targetProvided > 0) {
-      request.readyAt = request.readyAt ?? new Date();
-      request.fulfilledAt = null;
-      request.preparedBy = preparedBy;
-    } else if (effectiveStatus === "CANCELLED") {
-      request.readyAt = null;
-      request.fulfilledAt = new Date();
-      request.preparedBy = null;
-    } else {
-      request.readyAt = null;
-      request.fulfilledAt = null;
-      request.preparedBy = null;
-    }
+      if (effectiveStatus === "APPROVED" && targetProvided > 0) {
+        locked.readyAt = locked.readyAt ?? new Date();
+        locked.fulfilledAt = null;
+        locked.preparedBy = preparedBy;
+      } else if (effectiveStatus === "CANCELLED") {
+        locked.readyAt = null;
+        locked.fulfilledAt = new Date();
+        locked.preparedBy = null;
+      } else {
+        locked.readyAt = null;
+        locked.fulfilledAt = null;
+        locked.preparedBy = null;
+      }
 
-    await this.restockRepository.save(request);
+      await manager.save(locked);
+      return before;
+    });
 
     const updated = await this.reloadRestockRequest(id);
     if (!updated) {
@@ -918,12 +928,25 @@ export class StockService {
     return this.getDefaultWarehouseLocation();
   }
 
+  // Locks the vehicle stock level first and the request second, the same order bookings
+  // use (stock update, then restock sync). A different order could deadlock with a
+  // technician booking the same item at the same moment.
+  private async lockRestockRequest(
+    manager: EntityManager,
+    requestId: string,
+    stockLevelId: string,
+  ): Promise<RestockRequest | null> {
+    await manager.findOne(StockLevel, { where: { id: stockLevelId }, lock: { mode: "pessimistic_write" } });
+    return manager.findOne(RestockRequest, { where: { id: requestId }, lock: { mode: "pessimistic_write" } });
+  }
+
   private async applyPreparedQuantityDelta(
     request: RestockRequest,
     currentProvided: number,
     targetProvided: number,
     sourceLocation: Location | null,
-    actorUserId?: string,
+    actorUserId: string | undefined,
+    manager: EntityManager,
   ) {
     const delta = targetProvided - currentProvided;
     if (delta === 0) return;
@@ -941,7 +964,7 @@ export class StockService {
         occurredAt: new Date().toISOString(),
         note: `Bereitgestellt fuer ${request.vehicle.licensePlate || request.vehicle.description}`,
         source: "Bereitstellung",
-      });
+      }, manager);
       return;
     }
 
@@ -954,7 +977,7 @@ export class StockService {
       occurredAt: new Date().toISOString(),
       note: `Bereitstellung reduziert/storniert (${request.vehicle.licensePlate || request.vehicle.description})`,
       source: "Bereitstellung-Ruecknahme",
-    });
+    }, manager);
   }
 
   // externalManager: wenn gesetzt, laeuft die Synchronisation INNERHALB der
