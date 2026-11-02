@@ -5,6 +5,13 @@ Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.0.0
 
 ---
 
+## [4.8.3] – 2026-11-02 · Überflüssigen „Abschließen"-Button im Teilelager entfernt
+
+### Änderung
+- Der Button „Abschließen" im Dashboard (Teilelager) ist entfernt. Er schickte denselben Status und dieselbe Menge noch einmal an den Server, schloss nichts ab und löschte nur die Notiz der Anfrage. Erledigt wird eine Anfrage erst durch „Erhalten" beim Techniker.
+
+---
+
 ## [4.8.2] – 2026-11-02 · Handy zeigt bereitgestellte/erhaltene Teile sofort richtig an
 
 > **Hintergrund:** Auf dem Handy kam die Push-Meldung „Artikel bereitgestellt", aber das Dashboard zeigte den Artikel erst nach manuellem Aktualisieren. Nach „Erhalten" stand auf „Mein Fahrzeug" weiterhin „fehlt / bereitgestellt". Ursachen: (1) Der Service Worker brach Daten-Anfragen nach 3 Sekunden ab und lieferte die zuletzt gespeicherte (veraltete) Kopie. Ein Handy, das gerade aus dem Hintergrund kommt, braucht für die erste Anfrage oft länger. (2) Nach der Rückkehr in die App wurde nichts neu geladen, weil WebSocket und Timer im Hintergrund eingefroren waren. (3) „Mein Fahrzeug" hatte keine Live-Aktualisierung. (4) Das Dashboard lud bei jedem Update zusätzlich die komplette Flottenübersicht, obwohl sie nirgends angezeigt wurde.

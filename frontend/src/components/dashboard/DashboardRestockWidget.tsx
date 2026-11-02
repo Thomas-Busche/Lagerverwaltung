@@ -566,22 +566,6 @@ const DashboardRestockWidget: React.FC = () => {
                   Rückgängig
                 </Button>
               )}
-              {provided > 0 && request.status !== "FULFILLED" && (
-                <Button
-                  size="small"
-                  variant="contained"
-                  color="success"
-                  disabled={busyIds.has(request.id)}
-                  onClick={() =>
-                    void changeProvision(request.id, {
-                      status: "APPROVED",
-                      quantityProvided: provided,
-                    })
-                  }
-                >
-                  Abschließen
-                </Button>
-              )}
             </TableCell>
           </TableRow>
         );
