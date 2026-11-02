@@ -181,9 +181,12 @@ const DashboardRestockWidget: React.FC = () => {
       } else if (vehicleId) {
         const loadForVehicle = useRestockStore.getState().loadForVehicle;
         void loadForVehicle(vehicleId);
+        // The shortage rows come from the vehicle stock, not from the request list.
+        refreshStock();
       }
     },
     interval: refreshInterval,
+    fetchFleet: false,
   });
 
   const shortages = useMemo(

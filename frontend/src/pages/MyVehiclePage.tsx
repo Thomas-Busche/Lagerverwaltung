@@ -325,10 +325,13 @@ const MyVehiclePage = () => {
 
 
   // Offline-fähige Stock-Ladung mit Queue-Movements
-  const loadStock = async () => {
+  const loadStock = async (silent = false) => {
     if (!vehicleId) return;
-    setIsLoading(true);
-    setError(null);
+    // Silent reloads (live updates) must not flash the spinner or clear a visible message.
+    if (!silent) {
+      setIsLoading(true);
+      setError(null);
+    }
     try {
       let baseStock: StockLevelDto[] = [];
       if (isOnline) {
@@ -543,8 +546,17 @@ const MyVehiclePage = () => {
     // selbst korrigiert hat - es gab keinen Trigger fuer einen erneuten Ladeversuch.
   }, [vehicleId, isOnline]); // loadRestock dependency entfernt um Zucken zu vermeiden
 
-  // Live-Updates deaktiviert für bessere Offline-Kompatibilität
-  // Das useVehicleStock Hook übernimmt das Stock-Management
+  // Reload when the warehouse provides parts or another device books, and when the app
+  // returns from the background. No polling (interval 0): offline behaviour stays as it was.
+  useLiveFleetStock({
+    interval: 0,
+    fetchFleet: false,
+    onUpdate: () => {
+      if (!vehicleId || movementProcessingRef.current) return;
+      void loadStock(true);
+      void loadRestock(vehicleId);
+    },
+  });
 
   useEffect(() => {
     if (stock.length > 0) {

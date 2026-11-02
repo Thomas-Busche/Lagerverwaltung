@@ -5,6 +5,18 @@ Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.0.0
 
 ---
 
+## [4.8.2] – 2026-11-02 · Handy zeigt bereitgestellte/erhaltene Teile sofort richtig an
+
+> **Hintergrund:** Auf dem Handy kam die Push-Meldung „Artikel bereitgestellt", aber das Dashboard zeigte den Artikel erst nach manuellem Aktualisieren. Nach „Erhalten" stand auf „Mein Fahrzeug" weiterhin „fehlt / bereitgestellt". Ursachen: (1) Der Service Worker brach Daten-Anfragen nach 3 Sekunden ab und lieferte die zuletzt gespeicherte (veraltete) Kopie. Ein Handy, das gerade aus dem Hintergrund kommt, braucht für die erste Anfrage oft länger. (2) Nach der Rückkehr in die App wurde nichts neu geladen, weil WebSocket und Timer im Hintergrund eingefroren waren. (3) „Mein Fahrzeug" hatte keine Live-Aktualisierung. (4) Das Dashboard lud bei jedem Update zusätzlich die komplette Flottenübersicht, obwohl sie nirgends angezeigt wurde.
+
+### Bugfix
+- **Service Worker:** Zeitlimit für Daten-Anfragen von 3 auf 8 Sekunden. Bereitstellungs-Daten (`/stock/shortages`, `/stock/vehicle/:id/shortages`, `/stock/fleet`) werden nie mehr aus dem Zwischenspeicher geliefert, da sie nur online benutzbar sind und eine alte Kopie nur falsch sein kann. Fahrzeugbestand für den Offline-Betrieb bleibt wie bisher gecacht.
+- **Live-Update:** Kehrt die App in den Vordergrund zurück, wird die Verbindung bei Bedarf neu aufgebaut und sofort neu geladen. Gleiches nach „wieder online" und nach jeder WebSocket-Wiederverbindung.
+- **Dashboard:** Aktualisiert bei jedem Update auch den Fahrzeugbestand (Fehlmengen-Zeilen) und lädt nicht mehr die gesamte Flottenübersicht (weniger Datenverkehr, spürbar auf mobilem Netz).
+- **Mein Fahrzeug:** Bestand und Bereitstellungen aktualisieren sich live (WebSocket) und beim Zurückkehren in die App, ohne Ladeanzeige und ohne Polling.
+
+---
+
 ## [4.8.1] – 2026-11-02 · Bereitstellen/Rückgängig im Teilelager gegen Mehrfachklicks abgesichert
 
 > **Hintergrund:** Im Dump vom 02.11. zeigte die Bewegungshistorie neun Buchungen binnen 20 Sekunden für denselben Artikel (5× „Bereitstellung", 4× „Bereitstellung-Ruecknahme", netto korrekt). Die Buttons im Teilelager-Dashboard waren während der Anfrage nicht gesperrt und gaben kein Feedback, es wurde mehrfach geklickt (6 Status-Anfragen in 4 Sekunden). „Bereitstellung reduziert/storniert" ist die Gegenbuchung, die die Teile bei „Rückgängig" oder reduzierter Menge ins Teilelager zurückbucht.

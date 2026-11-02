@@ -10,6 +10,10 @@ const API_CACHE = `kfz-api-${CACHE_VERSION}`;
 const OFFLINE_DATA_CACHE = `kfz-offline-data-${CACHE_VERSION}`;
 const IMAGE_CACHE = 'kfz-item-images-v1';
 const DEFAULT_FETCH_TIMEOUT = 2500;
+// A phone that just woke up from the background often needs several seconds for the first
+// request (radio, TLS). Falling back to the cached copy after 3s showed outdated stock
+// until the user reloaded; a real outage still fails fast with a connection error.
+const API_DATA_TIMEOUT = 8000;
 
 const CACHEABLE_APIS = [
   '/api/items',
@@ -19,6 +23,10 @@ const CACHEABLE_APIS = [
   '/api/stock/',
   '/api/inventory/sessions',
 ];
+
+// Restock state is only usable online (pickup needs the server), so a cached copy can only
+// be wrong: it showed articles as "provided" long after the technician had collected them.
+const LIVE_ONLY_API = /^\/api\/stock\/(fleet|shortages|vehicle\/[^/]+\/shortages)$/;
 
 self.addEventListener('install', () => {
   // Workbox precaching übernimmt das App-Shell-Caching (App-Chunks, CSS, Icons).
@@ -127,7 +135,8 @@ self.addEventListener('fetch', (event) => {
       return;
     }
 
-    const shouldCache = CACHEABLE_APIS.some((apiPath) => url.pathname.startsWith(apiPath));
+    const shouldCache =
+      !LIVE_ONLY_API.test(url.pathname) && CACHEABLE_APIS.some((apiPath) => url.pathname.startsWith(apiPath));
     if (shouldCache) {
       event.respondWith(
         caches.open(OFFLINE_DATA_CACHE).then((cache) =>
@@ -147,7 +156,7 @@ self.addEventListener('fetch', (event) => {
             // 3s-Grenze) - der Cache-Fallback greift dann fast genauso
             // schnell wie zuvor, aber PCs mit funktionierender Verbindung
             // sehen jetzt immer den echten aktuellen Stand.
-            const networkFetch = fetchWithTimeout(request, { timeout: 3000 }).then((response) => {
+            const networkFetch = fetchWithTimeout(request, { timeout: API_DATA_TIMEOUT }).then((response) => {
               if (response.ok) {
                 const responseWithUtf8 = ensureUtf8Headers(response);
                 cache.put(request, responseWithUtf8.clone());
