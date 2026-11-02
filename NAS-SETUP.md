@@ -16,7 +16,7 @@ Portainer -> **Stacks** -> **Add stack**
 |---|---|
 | Name | z.B. `lagerverwaltung` |
 | Build method | `Repository` |
-| Repository URL | `https://github.com/Sirbuschi2003/Lagerverwaltung` |
+| Repository URL | `https://github.com/Thomas-Busche/Lagerverwaltung` |
 | Repository reference | `refs/heads/master` |
 | Compose path | `docker-compose.portainer.yml` |
 | Automatic updates | GitOps aktivieren, Polling z.B. alle 5 Min (optional) |

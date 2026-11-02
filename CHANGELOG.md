@@ -5,6 +5,18 @@ Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.0.0
 
 ---
 
+## [4.8.4] – 2026-11-02 · In-App-Update findet Versionen wieder (Repository umgezogen)
+
+> **Hintergrund:** Unter Administration → Wartung & Update stand „Keine Tags im Repository gefunden". Das GitHub-Repository ist von `Sirbuschi2003/Lagerverwaltung` nach `Thomas-Busche/Lagerverwaltung` umgezogen. GitHub antwortet für die alte Adresse mit „301 Moved Permanently", die App folgte der Weiterleitung nicht und wertete die Antwort als leere Tag-Liste. Betroffen waren Versionsprüfung und Changelog-Anzeige.
+
+### Bugfix
+- Neue Repository-Adresse in der Versionsprüfung. Zusätzlich folgt die App Weiterleitungen von GitHub (höchstens 3, nur zu `api.github.com` und `raw.githubusercontent.com`), damit eine künftige Umbenennung nichts mehr kaputt macht.
+- Fehlermeldungen unterscheiden jetzt „leere Tag-Liste" von „GitHub-Antwort ohne Tag-Liste (HTTP-Status)", z.B. bei Rate-Limit.
+- Repository-Links in Handbuch, README und NAS-Setup aktualisiert.
+- Regressionstests: Weiterleitung wird gefolgt, fremde Hosts werden abgelehnt, API-Fehler werden benannt.
+
+---
+
 ## [4.8.3] – 2026-11-02 · Überflüssigen „Abschließen"-Button im Teilelager entfernt
 
 ### Änderung

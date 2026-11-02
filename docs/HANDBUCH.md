@@ -116,7 +116,7 @@
 ### 0.2 Lokale Installation (Entwicklung / Test)
 
 ```bash
-git clone https://github.com/Sirbuschi2003/Lagerverwaltung.git
+git clone https://github.com/Thomas-Busche/Lagerverwaltung.git
 cd Lagerverwaltung
 cp .env.example .env
 # .env nach Bedarf anpassen (Standard-Werte funktionieren lokal)

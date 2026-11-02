@@ -193,7 +193,7 @@ Für Tests auf dem eigenen PC:
 
 ```bash
 # 1. Repository klonen
-git clone https://github.com/Sirbuschi2003/Lagerverwaltung.git
+git clone https://github.com/Thomas-Busche/Lagerverwaltung.git
 cd Lagerverwaltung
 
 # 2. Konfiguration erstellen
@@ -508,4 +508,4 @@ sudo docker compose -f docker-compose.main.yml up -d
 
 ## Lizenz
 
-Dieses Projekt ist für den internen Gebrauch entwickelt. Für Fragen zur Nutzung bitte ein [Issue](https://github.com/Sirbuschi2003/Lagerverwaltung/issues) öffnen.
+Dieses Projekt ist für den internen Gebrauch entwickelt. Für Fragen zur Nutzung bitte ein [Issue](https://github.com/Thomas-Busche/Lagerverwaltung/issues) öffnen.

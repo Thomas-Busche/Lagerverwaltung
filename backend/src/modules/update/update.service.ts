@@ -26,10 +26,12 @@ export interface UpdateStatus {
   instanceId: string; // Ändert sich bei jedem Neustart des Backends → Frontend erkennt Neustart
 }
 
+const REDIRECT_HOSTS = new Set(["api.github.com", "raw.githubusercontent.com"]);
+
 @Injectable()
 export class UpdateService {
   private readonly logger = new Logger(UpdateService.name);
-  private readonly GITHUB_REPO = "Sirbuschi2003/Lagerverwaltung";
+  private readonly GITHUB_REPO = "Thomas-Busche/Lagerverwaltung";
   private readonly CACHE_TTL = 5 * 60 * 1000;
 
   private cachedStatus: UpdateStatus;
@@ -85,27 +87,62 @@ export class UpdateService {
   }
 
   async getChangelog(): Promise<string> {
+    const response = await this.httpsGet(
+      "raw.githubusercontent.com",
+      `/${this.GITHUB_REPO}/master/CHANGELOG.md`,
+      {},
+      8000,
+      "Changelog-Abruf Timeout",
+    );
+    return response.status === 404 ? "Kein Changelog verfügbar." : response.body;
+  }
+
+  /**
+   * GET with a bounded number of redirects. GitHub answers 301 for renamed or moved
+   * repositories, which made the tag lookup report "no tags" after the repo moved.
+   * Redirects are only followed to the two GitHub hosts this service talks to.
+   */
+  private httpsGet(
+    host: string,
+    path: string,
+    headers: Record<string, string>,
+    timeoutMs: number,
+    timeoutMessage: string,
+    redirectsLeft = 3,
+  ): Promise<{ status: number; body: string }> {
     return new Promise((resolve, reject) => {
       const req = https.get(
-        {
-          hostname: "raw.githubusercontent.com",
-          path: `/${this.GITHUB_REPO}/master/CHANGELOG.md`,
-          headers: { "User-Agent": "Lagerverwaltung-Update-Check/1.0" },
-        },
+        { hostname: host, path, headers: { "User-Agent": "Lagerverwaltung-Update-Check/1.0", ...headers } },
         (res) => {
-          if (res.statusCode === 404) {
-            resolve("Kein Changelog verfügbar.");
+          const status = res.statusCode ?? 0;
+          const location = res.headers.location;
+          if ([301, 302, 307, 308].includes(status) && location) {
+            res.resume();
+            let target: URL;
+            try {
+              target = new URL(location, `https://${host}`);
+            } catch {
+              reject(new Error("Ungültige Weiterleitung von GitHub"));
+              return;
+            }
+            if (redirectsLeft <= 0 || target.protocol !== "https:" || !REDIRECT_HOSTS.has(target.hostname)) {
+              reject(new Error("Unerwartete Weiterleitung von GitHub"));
+              return;
+            }
+            resolve(
+              this.httpsGet(target.hostname, `${target.pathname}${target.search}`, headers, timeoutMs, timeoutMessage, redirectsLeft - 1),
+            );
             return;
           }
-          let data = "";
-          res.on("data", (chunk) => (data += chunk));
-          res.on("end", () => resolve(data));
+          let body = "";
+          res.on("data", (chunk) => (body += chunk));
+          res.on("end", () => resolve({ status, body }));
         },
       );
       req.on("error", reject);
-      req.setTimeout(8000, () => {
+      req.setTimeout(timeoutMs, () => {
         req.destroy();
-        reject(new Error("Changelog-Abruf Timeout"));
+        reject(new Error(timeoutMessage));
       });
     });
   }
@@ -399,39 +436,26 @@ export class UpdateService {
   }
 
   /** Neuesten Git-Tag = Versionsnummer */
-  private fetchLatestTag(): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const req = https.get(
-        {
-          hostname: "api.github.com",
-          path: `/repos/${this.GITHUB_REPO}/tags`,
-          headers: {
-            "User-Agent": "Lagerverwaltung-Update-Check/1.0",
-            Accept: "application/vnd.github.v3+json",
-          },
-        },
-        (res) => {
-          let data = "";
-          res.on("data", (chunk) => (data += chunk));
-          res.on("end", () => {
-            try {
-              const tags = JSON.parse(data) as Array<{ name: string }>;
-              if (!Array.isArray(tags) || tags.length === 0) {
-                reject(new Error("Keine Tags im Repository gefunden"));
-                return;
-              }
-              resolve(tags[0].name.replace(/^v/, ""));
-            } catch {
-              reject(new Error("Ungültige GitHub-Antwort"));
-            }
-          });
-        },
-      );
-      req.on("error", reject);
-      req.setTimeout(10_000, () => {
-        req.destroy();
-        reject(new Error("GitHub API Timeout"));
-      });
-    });
+  private async fetchLatestTag(): Promise<string> {
+    const response = await this.httpsGet(
+      "api.github.com",
+      `/repos/${this.GITHUB_REPO}/tags`,
+      { Accept: "application/vnd.github.v3+json" },
+      10_000,
+      "GitHub API Timeout",
+    );
+
+    let tags: Array<{ name: string }>;
+    try {
+      tags = JSON.parse(response.body) as Array<{ name: string }>;
+    } catch {
+      throw new Error("Ungültige GitHub-Antwort");
+    }
+    if (!Array.isArray(tags) || tags.length === 0) {
+      // A non-array body is an API error (rate limit, moved repo), not an empty tag list.
+      const reason = Array.isArray(tags) ? "Keine Tags im Repository gefunden" : `GitHub-Antwort ohne Tag-Liste (HTTP ${response.status})`;
+      throw new Error(reason);
+    }
+    return tags[0].name.replace(/^v/, "");
   }
 }
