@@ -33,6 +33,17 @@ export class PurchasingController {
     );
   }
 
+  // Declared before ":id" so "overdue" is not taken for an order id.
+  @Get("overdue")
+  @Permissions("orders.view")
+  overdue(@Req() req: Request, @Query("days") days?: string) {
+    return this.purchasingService.findOverdue({
+      branchId: req.user?.branchId,
+      locationIds: req.user?.locationIds,
+      days: days ? Number.parseInt(days, 10) : undefined,
+    });
+  }
+
   @Get()
   @Permissions("orders.view")
   findAll(

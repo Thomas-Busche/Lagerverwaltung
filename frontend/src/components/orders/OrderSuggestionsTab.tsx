@@ -66,6 +66,7 @@ import {
   type CompanyConfigDto,
   type EmailTemplate,
 } from "../../utils/api";
+import { getLocationLabel as getLocationLabelFor } from "../../utils/locationLabel";
 import ItemEditDialog from "../items/ItemEditDialog";
 
 interface WizardLine {
@@ -259,57 +260,7 @@ const OrderSuggestionsTab: React.FC = () => {
     return map;
   }, [locations]);
 
-  const getLocationChain = (loc?: LocationDto | null): LocationDto[] => {
-    if (!loc) return [];
-
-    const chain: LocationDto[] = [];
-    const seen = new Set<string>();
-    let current: LocationDto | null | undefined = loc;
-
-    while (current && !seen.has(current.id)) {
-      seen.add(current.id);
-      chain.push(current);
-      const parentId: string | undefined = current.parent?.id;
-      current = parentId ? (locationMap.get(parentId) ?? current.parent) : null;
-    }
-
-    return chain.reverse();
-  };
-
-  const formatStructuredCode = (code?: string | null): string | null => {
-    const raw = code?.trim() ?? "";
-    if (!raw) return null;
-
-    const shelfMatch = raw.match(/regal\D*(\d+)\D+fach\D*(\d+)/i);
-    if (shelfMatch) {
-      return `Regal ${shelfMatch[1]} / Fach ${shelfMatch[2]}`;
-    }
-
-    const cabinetMatch = raw.match(/schrank\D*(\d+)\D+schublade\D*(\d+)/i);
-    if (cabinetMatch) {
-      return `Schrank ${cabinetMatch[1]} / Schublade ${cabinetMatch[2]}`;
-    }
-
-    return null;
-  };
-
-  const getLocationLabel = (loc?: LocationDto | null) => {
-    if (!loc) return "-";
-
-    const chain = getLocationChain(loc);
-    const relevantNodes = chain.filter(
-      (entry) => entry.type !== "WAREHOUSE" && entry.type !== "VEHICLE",
-    );
-    const target = relevantNodes[relevantNodes.length - 1] ?? chain[chain.length - 1] ?? loc;
-
-    const structuredName = target.name?.trim();
-    if (structuredName) return structuredName;
-
-    const structuredCode = formatStructuredCode(target.code);
-    if (structuredCode) return structuredCode;
-
-    return target.code || "-";
-  };
+  const getLocationLabel = (loc?: LocationDto | null) => getLocationLabelFor(loc, (id) => locationMap.get(id));
 
   const getDailyRate = (suggestion: PurchaseOrderSuggestionDto) => {
     const rates = suggestion.consumptionRates;

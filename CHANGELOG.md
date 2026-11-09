@@ -5,6 +5,19 @@ Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.0.0
 
 ---
 
+## [4.9.0] – 2026-11-09 · Lagerort im Wareneingang + überfällige Bestellungen im Dashboard
+
+### Neue Funktion
+- **Wareneingang:** Nach dem Scannen zeigt die grüne Meldung und der Scan-Treffer jetzt den **Lagerort** des Artikels (Regal/Fach bzw. Lagerort-Name), damit er direkt eingeräumt werden kann. Auch nach „OK übernehmen" steht der Lagerort in der Bestätigung. Hat der Artikel keinen Lagerort, steht dort „kein Lagerort hinterlegt". Die Bestellliste liefert dafür den Lagerort des Artikels mit.
+- **Dashboard:** Neues Widget **Überfällige Bestellungen**. Bestellungen mit Status „Bestellt", die seit mehr als einem Monat (30 Tage ab Bestelldatum, ohne Bestelldatum ab Erstellung) nicht vollständig geliefert sind, erscheinen oben als Hinweis mit Bestellnummer, Lieferant, Alter und offener Menge (Klick führt zu den Bestellungen). Sind keine Bestellungen überfällig, erscheint nichts. Für Benutzer mit dem Recht „Bestellungen ansehen", gefiltert nach Niederlassung und Lager wie die Bestellliste. Das Widget ist für alle Benutzer automatisch aktiv (auch bei bereits angepasstem Dashboard) und lässt sich unter „Dashboard anpassen" ausblenden.
+
+### Technik
+- Neue Route `GET /purchase-orders/overdue?days=30` (Recht `orders.view`).
+- Lagerort-Beschriftung als gemeinsame Funktion (`utils/locationLabel`), auch von den Bestellvorschlägen genutzt.
+- Tests für die Berechnung der überfälligen Bestellungen (offene Positionen, Altersberechnung, Rückfall auf Erstellungsdatum).
+
+---
+
 ## [4.8.4] – 2026-11-02 · In-App-Update findet Versionen wieder (Repository umgezogen)
 
 > **Hintergrund:** Unter Administration → Wartung & Update stand „Keine Tags im Repository gefunden". Das GitHub-Repository ist von `Sirbuschi2003/Lagerverwaltung` nach `Thomas-Busche/Lagerverwaltung` umgezogen. GitHub antwortet für die alte Adresse mit „301 Moved Permanently", die App folgte der Weiterleitung nicht und wertete die Antwort als leere Tag-Liste. Betroffen waren Versionsprüfung und Changelog-Anzeige.

@@ -5,6 +5,7 @@ import { useBackgroundSync } from "../hooks/useBackgroundSync";
 import { useUserSettingsStore } from "../store/useUserSettingsStore";
 import type { DashboardWidgetId } from "../store/useUserSettingsStore";
 import DashboardKpiWidget from "../components/dashboard/DashboardKpiWidget";
+import DashboardOverdueOrdersWidget from "../components/dashboard/DashboardOverdueOrdersWidget";
 import DashboardRestockWidget from "../components/dashboard/DashboardRestockWidget";
 import DashboardRecentMovementsWidget from "../components/dashboard/DashboardRecentMovementsWidget";
 import DashboardSettingsDialog from "../components/dashboard/DashboardSettingsDialog";
@@ -27,6 +28,8 @@ const DashboardPage = () => {
 
   const renderWidget = (widgetId: DashboardWidgetId) => {
     switch (widgetId) {
+      case "overdue-orders":
+        return <DashboardOverdueOrdersWidget />;
       case "kpi":
         return <DashboardKpiWidget />;
       case "restock":

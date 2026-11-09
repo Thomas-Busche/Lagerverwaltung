@@ -926,6 +926,21 @@ export const fetchPurchaseOrders = async (params?: PurchaseOrderQueryParams): Pr
   return response.data;
 };
 
+export interface OverdueOrderDto {
+  id: string;
+  orderNumber: string | null;
+  supplierName: string;
+  orderedAt: string;
+  ageDays: number;
+  openLines: number;
+  openQuantity: number;
+}
+
+export const fetchOverdueOrders = async (days?: number): Promise<OverdueOrderDto[]> => {
+  const response = await api.get<OverdueOrderDto[]>("/purchase-orders/overdue", { params: days ? { days } : undefined });
+  return response.data;
+};
+
 export const fetchPurchaseOrder = async (id: string): Promise<PurchaseOrderDto> => {
   const response = await api.get<PurchaseOrderDto>(`/purchase-orders/${id}`);
   return response.data;

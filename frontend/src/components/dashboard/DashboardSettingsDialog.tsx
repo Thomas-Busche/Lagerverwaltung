@@ -29,6 +29,7 @@ import { useUserSettingsStore } from "../../store/useUserSettingsStore";
 import useAuthStore from "../../store/useAuthStore";
 
 const WIDGET_LABELS: Record<DashboardWidgetId, string> = {
+  "overdue-orders": "Überfällige Bestellungen (älter als 1 Monat)",
   kpi: "KPI Übersicht (Artikel, Sollbestand, Inventuren)",
   restock: "Nachbestellung / Teileübersicht",
   "recent-movements": "Letzte Buchungen",

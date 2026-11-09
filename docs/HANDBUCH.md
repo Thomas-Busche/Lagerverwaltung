@@ -392,7 +392,7 @@ Klick auf die Artikelnummer öffnet den Artikeldialog direkt.
 
 | Schritt | Aktion |
 |---------|--------|
-| 1 | Artikel-Barcode scannen → Scan-Treffer erscheint mit Vorschlagsmenge |
+| 1 | Artikel-Barcode scannen → Scan-Treffer erscheint mit Vorschlagsmenge **und dem Lagerort**, an den der Artikel geräumt wird (ab v4.9; ohne hinterlegten Lagerort steht dort „kein Lagerort hinterlegt") |
 | 2 | Menge prüfen (ggf. anpassen) |
 | 3 | **CONFIRM-QR-Code** scannen → bestätigt den Treffer (= „OK übernehmen") |
 | 4 | Nächsten Artikel scannen |
@@ -636,7 +636,7 @@ Jeder Benutzer kann eigene Präferenzen speichern (serverseitig, geräteübergre
 - **Theme:** Hell / Dunkel / Systemstandard + Farbschema
 - **Schnellbuchung-Workflow:** Vorgangsnummer zuerst oder direkt Artikel
 - **Duplikat-Warnung:** Ein/Aus + Zeitraum
-- **Dashboard-Widgets:** Sichtbarkeit und Reihenfolge
+- **Dashboard-Widgets:** Sichtbarkeit und Reihenfolge. Das Widget **Überfällige Bestellungen** (ab v4.9) erscheint nur, wenn Bestellungen mit Status „Bestellt" seit mehr als einem Monat (30 Tage, ab Bestelldatum) noch nicht vollständig geliefert sind. Es zeigt Bestellnummer, Lieferant, Alter und die noch offene Menge, ein Klick führt zu den Bestellungen. Sichtbar für Benutzer mit dem Recht „Bestellungen ansehen", nur für das eigene Lager bzw. die eigene Niederlassung.
 - **Schnellzugriff-Buttons:** Konfigurierbar für Desktop und Mobil
 
 Alle Einstellungen werden serverseitig gespeichert und sind nach Reload (F5) oder erneutem Anmelden sofort wiederhergestellt.

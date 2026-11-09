@@ -21,6 +21,7 @@ import { SystemConfigService } from "../system-config/system-config.service";
 
 import { PurchaseOrderLine } from "./entities/purchase-order-line.entity";
 import { PurchaseOrder, PurchaseOrderStatus } from "./entities/purchase-order.entity";
+import { clampOverdueDays, overdueCutoff, toOverdueOrderView, type OverdueOrderView } from "./overdue-orders.util";
 import { PurchaseSuggestionService } from "./purchase-suggestion.service";
 
 export type PurchaseOrderSortField = "createdAt" | "orderedAt" | "supplier";
@@ -96,6 +97,7 @@ export class PurchasingService {
       .leftJoinAndSelect("order.branch", "branch")
       .leftJoinAndSelect("order.lines", "line")
       .leftJoinAndSelect("line.item", "item")
+      .leftJoinAndSelect("item.storageLocation", "storageLocation")
       .leftJoinAndSelect("item.codes", "itemCodes");
 
     if (params?.branchId) {
@@ -142,6 +144,35 @@ export class PurchasingService {
     const offset = ((params?.page ?? 1) - 1) * limit;
     const [orders, total] = await qb.take(limit).skip(offset).getManyAndCount();
     return { orders, total, page: params?.page ?? 1, limit };
+  }
+
+  /** Open orders waiting for delivery longer than `days`, oldest first (dashboard reminder). */
+  async findOverdue(params: { branchId?: string | null; locationIds?: string[]; days?: number }): Promise<OverdueOrderView[]> {
+    const days = clampOverdueDays(params.days);
+    const now = new Date();
+
+    const qb = this.ordersRepository
+      .createQueryBuilder("order")
+      .leftJoinAndSelect("order.supplier", "supplier")
+      .leftJoinAndSelect("order.lines", "line")
+      .where("order.status = :status", { status: "ORDERED" })
+      .andWhere("COALESCE(order.orderedAt, order.createdAt) <= :cutoff", { cutoff: overdueCutoff(days, now) });
+
+    if (params.branchId) {
+      qb.andWhere("order.branchId = :branchId", { branchId: params.branchId });
+    }
+    // Same warehouse filter as the order list: own warehouse or orders without one.
+    if (params.locationIds?.length) {
+      qb.andWhere("(order.locationId IN (:...locationIds) OR order.locationId IS NULL)", {
+        locationIds: params.locationIds,
+      });
+    }
+
+    const orders = await qb.getMany();
+    return orders
+      .map((order) => toOverdueOrderView(order, now))
+      .filter((view): view is OverdueOrderView => view !== null)
+      .sort((a, b) => a.orderedAt.getTime() - b.orderedAt.getTime());
   }
 
   async findOne(id: string, branchId?: string | null) {

@@ -42,6 +42,7 @@ import {
   type PurchaseOrderLineDto,
 } from "../../utils/api";
 import { findItemByCode } from "../../utils/itemLookup";
+import { getLocationLabel } from "../../utils/locationLabel";
 import ItemEditDialog from "../items/ItemEditDialog";
 
 type DeliveryState = "OPEN" | "PARTIAL" | "COMPLETE";
@@ -59,7 +60,13 @@ type ScanCandidate = {
   alreadyReceived: number;
   remaining: number;
   suggestedQuantity: number;
+  locationLabel: string;
 };
+
+const NO_LOCATION_LABEL = "kein Lagerort hinterlegt";
+
+const getStorageLocationLabel = (line: PurchaseOrderLineDto): string =>
+  line.item?.storageLocation ? getLocationLabel(line.item.storageLocation) : NO_LOCATION_LABEL;
 
 const deliveryMetaMap: Record<DeliveryState, DeliveryMeta> = {
   OPEN: { label: "Offen", color: "default" },
@@ -432,10 +439,11 @@ const GoodsReceiptTab: React.FC = () => {
     }
 
     setError(null);
+    const locationLabel = getStorageLocationLabel(line);
     setScanFeedback(
       `Scan erkannt: ${line.item?.code || code} | Bestellt ${line.quantity ?? 0}, bereits ${
         line.receivedQuantity ?? 0
-      }, offen ${remaining}.`,
+      }, offen ${remaining} | Lagerort: ${locationLabel}`,
     );
     setScanCandidate({
       lineId: line.id,
@@ -445,6 +453,7 @@ const GoodsReceiptTab: React.FC = () => {
       alreadyReceived: line.receivedQuantity ?? 0,
       remaining,
       suggestedQuantity: remaining,
+      locationLabel,
     });
     setBarcodeInput("");
     focusBarcodeInput();
@@ -463,7 +472,9 @@ const GoodsReceiptTab: React.FC = () => {
       [scanCandidate.lineId]: bookedQty,
     }));
     setError(null);
-    setScanFeedback(`${scanCandidate.code}: ${bookedQty} Stk. für den Wareneingang vorgemerkt.`);
+    setScanFeedback(
+      `${scanCandidate.code}: ${bookedQty} Stk. für den Wareneingang vorgemerkt | Lagerort: ${scanCandidate.locationLabel}`,
+    );
     setScanCandidate(null);
     setBarcodeInput("");
     focusBarcodeInput();
@@ -737,6 +748,7 @@ const GoodsReceiptTab: React.FC = () => {
                     {scanCandidate.description}
                   </Typography>
                 </Box>
+                <Chip size="small" color="info" label={`Lagerort: ${scanCandidate.locationLabel}`} />
                 <Chip size="small" label={`Bestellt ${scanCandidate.ordered}`} />
                 <Chip size="small" label={`Bereits ${scanCandidate.alreadyReceived}`} />
                 <Chip size="small" label={`Offen ${scanCandidate.remaining}`} color="warning" />

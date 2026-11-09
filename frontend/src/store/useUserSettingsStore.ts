@@ -4,7 +4,7 @@ import { fetchUserSettings, saveUserSettings } from "../utils/api";
 const PRIVACY_LS_KEY = "privacyAcceptedVersion";
 const SETTINGS_LS_KEY = "lv-user-settings";
 
-export type DashboardWidgetId = "kpi" | "restock" | "recent-movements";
+export type DashboardWidgetId = "overdue-orders" | "kpi" | "restock" | "recent-movements";
 
 export interface QuickAction {
   id: string;
@@ -44,8 +44,8 @@ const DEFAULT_QUICK_ACTION: QuickAction = {
 
 const DEFAULT_SETTINGS: UserSettings = {
   dashboard: {
-    visibleWidgets: ["kpi", "restock", "recent-movements"],
-    widgetOrder: ["kpi", "restock", "recent-movements"],
+    visibleWidgets: ["overdue-orders", "kpi", "restock", "recent-movements"],
+    widgetOrder: ["overdue-orders", "kpi", "restock", "recent-movements"],
   },
   quickActions: {
     desktop: [DEFAULT_QUICK_ACTION],
@@ -70,6 +70,16 @@ function parseActionList(raw: unknown, fallback: QuickAction[]): QuickAction[] {
   return (raw as QuickAction[]).map(migrateAction);
 }
 
+// Widgets introduced after a user saved their dashboard are missing from the saved order
+// (hidden widgets stay in it), so they are shown first instead of staying invisible.
+function addNewDefaultWidgets(
+  visible: DashboardWidgetId[],
+  order: DashboardWidgetId[],
+): { visibleWidgets: DashboardWidgetId[]; widgetOrder: DashboardWidgetId[] } {
+  const added = DEFAULT_SETTINGS.dashboard.widgetOrder.filter((id) => !order.includes(id));
+  return { visibleWidgets: [...added, ...visible], widgetOrder: [...added, ...order] };
+}
+
 function mergeWithDefaults(raw: Record<string, unknown>): UserSettings {
   const dashboard = (raw.dashboard as any) ?? {};
 
@@ -90,17 +100,19 @@ function mergeWithDefaults(raw: Record<string, unknown>): UserSettings {
     quickActions = DEFAULT_SETTINGS.quickActions;
   }
 
+  const savedWidgets = addNewDefaultWidgets(
+    (Array.isArray(dashboard.visibleWidgets)
+      ? dashboard.visibleWidgets
+      : DEFAULT_SETTINGS.dashboard.visibleWidgets
+    ).filter((w: string) => w !== "quick-actions") as DashboardWidgetId[],
+    (Array.isArray(dashboard.widgetOrder)
+      ? dashboard.widgetOrder
+      : DEFAULT_SETTINGS.dashboard.widgetOrder
+    ).filter((w: string) => w !== "quick-actions") as DashboardWidgetId[],
+  );
+
   return {
-    dashboard: {
-      visibleWidgets: (Array.isArray(dashboard.visibleWidgets)
-        ? dashboard.visibleWidgets
-        : DEFAULT_SETTINGS.dashboard.visibleWidgets
-      ).filter((w: string) => w !== "quick-actions") as DashboardWidgetId[],
-      widgetOrder: (Array.isArray(dashboard.widgetOrder)
-        ? dashboard.widgetOrder
-        : DEFAULT_SETTINGS.dashboard.widgetOrder
-      ).filter((w: string) => w !== "quick-actions") as DashboardWidgetId[],
-    },
+    dashboard: savedWidgets,
     quickActions,
     privacyAcceptedVersion: typeof raw.privacyAcceptedVersion === "string" ? raw.privacyAcceptedVersion : undefined,
     privacyAcceptedAt: typeof raw.privacyAcceptedAt === "string" ? raw.privacyAcceptedAt : null,
