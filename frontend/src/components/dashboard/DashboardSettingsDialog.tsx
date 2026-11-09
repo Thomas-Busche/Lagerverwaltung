@@ -25,11 +25,12 @@ import {
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
 import type { DashboardWidgetId, QuickAction, QuickActions } from "../../store/useUserSettingsStore";
+import { MAX_OVERDUE_DAYS, MIN_OVERDUE_DAYS } from "../../store/useUserSettingsStore";
 import { useUserSettingsStore } from "../../store/useUserSettingsStore";
 import useAuthStore from "../../store/useAuthStore";
 
 const WIDGET_LABELS: Record<DashboardWidgetId, string> = {
-  "overdue-orders": "Überfällige Bestellungen (älter als 1 Monat)",
+  "overdue-orders": "Überfällige Bestellungen",
   kpi: "KPI Übersicht (Artikel, Sollbestand, Inventuren)",
   restock: "Nachbestellung / Teileübersicht",
   "recent-movements": "Letzte Buchungen",
@@ -130,6 +131,7 @@ const DashboardSettingsDialog: React.FC<Props> = ({ open, onClose }) => {
 
   const [visibleWidgets, setVisibleWidgets] = useState<DashboardWidgetId[]>(settings.dashboard.visibleWidgets);
   const [quickActions, setQuickActions] = useState<QuickActions>(settings.quickActions);
+  const [overdueDays, setOverdueDays] = useState(String(settings.overdueOrderDays));
   const [activeTab, setActiveTab] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,6 +139,7 @@ const DashboardSettingsDialog: React.FC<Props> = ({ open, onClose }) => {
     if (open) {
       setVisibleWidgets(settings.dashboard.visibleWidgets);
       setQuickActions(settings.quickActions);
+      setOverdueDays(String(settings.overdueOrderDays));
       setActiveTab(0);
       setError(null);
     }
@@ -148,10 +151,23 @@ const DashboardSettingsDialog: React.FC<Props> = ({ open, onClose }) => {
     );
   };
 
+  const parsedOverdueDays = Number(overdueDays);
+  const overdueDaysValid =
+    Number.isInteger(parsedOverdueDays) && parsedOverdueDays >= MIN_OVERDUE_DAYS && parsedOverdueDays <= MAX_OVERDUE_DAYS;
+
   const handleSave = async () => {
     setError(null);
+    if (!overdueDaysValid) {
+      setError(`Überfällige Bestellungen: bitte eine ganze Zahl von ${MIN_OVERDUE_DAYS} bis ${MAX_OVERDUE_DAYS} Tagen eingeben.`);
+      return;
+    }
     try {
-      await saveSettings({ ...settings, dashboard: { visibleWidgets, widgetOrder: settings.dashboard.widgetOrder }, quickActions });
+      await saveSettings({
+        ...settings,
+        dashboard: { visibleWidgets, widgetOrder: settings.dashboard.widgetOrder },
+        quickActions,
+        overdueOrderDays: parsedOverdueDays,
+      });
       onClose();
     } catch {
       setError("Fehler beim Speichern der Einstellungen.");
@@ -175,6 +191,24 @@ const DashboardSettingsDialog: React.FC<Props> = ({ open, onClose }) => {
             />
           ))}
         </Stack>
+
+        {visibleWidgets.includes("overdue-orders") && (
+          <TextField
+            label="Bestellung überfällig nach (Tagen)"
+            type="number"
+            size="small"
+            value={overdueDays}
+            onChange={(event) => setOverdueDays(event.target.value)}
+            error={!overdueDaysValid}
+            helperText={
+              overdueDaysValid
+                ? "Bestellungen, die so lange nicht vollständig geliefert sind, erscheinen auf dem Dashboard."
+                : `Ganze Zahl von ${MIN_OVERDUE_DAYS} bis ${MAX_OVERDUE_DAYS}.`
+            }
+            inputProps={{ min: MIN_OVERDUE_DAYS, max: MAX_OVERDUE_DAYS, step: 1 }}
+            sx={{ mb: 2, maxWidth: 320 }}
+          />
+        )}
 
         <Divider sx={{ my: 2 }} />
 

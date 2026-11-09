@@ -30,6 +30,7 @@ export interface UserSettings {
   quickBookingWorkflow: boolean;
   quickBookingDuplicateCheck: boolean;
   quickBookingDuplicateCheckMonths: number;
+  overdueOrderDays: number;
   themeMode: string;
   themePreset: string;
 }
@@ -54,6 +55,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   quickBookingWorkflow: true,
   quickBookingDuplicateCheck: true,
   quickBookingDuplicateCheckMonths: 2,
+  overdueOrderDays: 30,
   themeMode: "",
   themePreset: "",
 };
@@ -78,6 +80,13 @@ function addNewDefaultWidgets(
 ): { visibleWidgets: DashboardWidgetId[]; widgetOrder: DashboardWidgetId[] } {
   const added = DEFAULT_SETTINGS.dashboard.widgetOrder.filter((id) => !order.includes(id));
   return { visibleWidgets: [...added, ...visible], widgetOrder: [...added, ...order] };
+}
+
+export const MIN_OVERDUE_DAYS = 1;
+export const MAX_OVERDUE_DAYS = 365;
+
+export function isValidOverdueDays(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= MIN_OVERDUE_DAYS && value <= MAX_OVERDUE_DAYS;
 }
 
 function mergeWithDefaults(raw: Record<string, unknown>): UserSettings {
@@ -119,6 +128,7 @@ function mergeWithDefaults(raw: Record<string, unknown>): UserSettings {
     quickBookingWorkflow: typeof raw.quickBookingWorkflow === "boolean" ? raw.quickBookingWorkflow : DEFAULT_SETTINGS.quickBookingWorkflow,
     quickBookingDuplicateCheck: typeof raw.quickBookingDuplicateCheck === "boolean" ? raw.quickBookingDuplicateCheck : DEFAULT_SETTINGS.quickBookingDuplicateCheck,
     quickBookingDuplicateCheckMonths: typeof raw.quickBookingDuplicateCheckMonths === "number" && raw.quickBookingDuplicateCheckMonths >= 1 ? raw.quickBookingDuplicateCheckMonths : DEFAULT_SETTINGS.quickBookingDuplicateCheckMonths,
+    overdueOrderDays: isValidOverdueDays(raw.overdueOrderDays) ? raw.overdueOrderDays : DEFAULT_SETTINGS.overdueOrderDays,
     themeMode: typeof raw.themeMode === "string" ? raw.themeMode : "",
     themePreset: typeof raw.themePreset === "string" ? raw.themePreset : "",
   };

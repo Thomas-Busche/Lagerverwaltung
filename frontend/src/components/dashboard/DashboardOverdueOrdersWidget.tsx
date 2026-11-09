@@ -4,21 +4,23 @@ import { Alert, AlertTitle, Box, Button, Chip, Stack, Typography } from "@mui/ma
 import { fetchOverdueOrders, type OverdueOrderDto } from "../../utils/api";
 import useAuthStore from "../../store/useAuthStore";
 import { isEffectivelyOffline } from "../../store/useNetworkStore";
-
-const OVERDUE_DAYS = 30;
+import { useUserSettingsStore } from "../../store/useUserSettingsStore";
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE");
 
 const DashboardOverdueOrdersWidget: React.FC = () => {
   const navigate = useNavigate();
   const canViewOrders = useAuthStore((state) => state.hasPermission("orders.view"));
+  const overdueDays = useUserSettingsStore((state) => state.settings.overdueOrderDays);
+  const settingsLoaded = useUserSettingsStore((state) => state.loaded);
   const [orders, setOrders] = useState<OverdueOrderDto[]>([]);
 
   useEffect(() => {
-    if (!canViewOrders || isEffectivelyOffline()) return;
+    // Wait for the saved threshold; otherwise the default would be fetched first and then replaced.
+    if (!canViewOrders || !settingsLoaded || isEffectivelyOffline()) return;
 
     let active = true;
-    fetchOverdueOrders(OVERDUE_DAYS)
+    fetchOverdueOrders(overdueDays)
       .then((data) => {
         if (active) setOrders(data);
       })
@@ -28,7 +30,7 @@ const DashboardOverdueOrdersWidget: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [canViewOrders]);
+  }, [canViewOrders, settingsLoaded, overdueDays]);
 
   // Nothing overdue: the widget stays out of the way instead of showing an empty card.
   if (!canViewOrders || orders.length === 0) return null;
@@ -44,8 +46,8 @@ const DashboardOverdueOrdersWidget: React.FC = () => {
     >
       <AlertTitle>
         {orders.length === 1
-          ? "1 Bestellung wartet seit über einem Monat auf Lieferung"
-          : `${orders.length} Bestellungen warten seit über einem Monat auf Lieferung`}
+          ? `1 Bestellung wartet seit über ${overdueDays} Tagen auf Lieferung`
+          : `${orders.length} Bestellungen warten seit über ${overdueDays} Tagen auf Lieferung`}
       </AlertTitle>
       <Stack spacing={0.75} sx={{ mt: 1 }}>
         {orders.map((order) => (
