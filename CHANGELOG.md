@@ -9,6 +9,7 @@ Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.0.0
 
 ### Änderung
 - Ein Klick auf den Hinweis „Überfällige Bestellungen" (Zeile oder Button „Zu den offenen Bestellungen") öffnet die Bestellseite jetzt direkt im Reiter **Offen** statt bei den Vorschlägen. Dafür kann die Bestellseite einen Reiter per Link wählen (`/orders?tab=offen`; weitere Werte: `vorschlaege`, `wareneingang`, `archiv`). Ohne Angabe bleibt „Vorschläge" der Start.
+- Im Reiter **Offen** werden überfällige Bestellungen jetzt hervorgehoben: gelb hinterlegt, farbiger Rand links und ein Chip „seit X Tagen" neben dem Status. Überfällig heißt wie im Dashboard: Status „Bestellt", noch Positionen offen und älter als die eingestellte Schwelle (Standard 30 Tage, unter „Dashboard anpassen" änderbar).
 
 ---
 

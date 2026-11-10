@@ -45,6 +45,8 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 
 import useAuthStore from "../../store/useAuthStore";
+import { useUserSettingsStore } from "../../store/useUserSettingsStore";
+import { getWaitingDays } from "../../utils/overdueOrder";
 import ItemEditDialog from "../items/ItemEditDialog";
 import {
   deletePurchaseOrder,
@@ -197,6 +199,7 @@ const SortableLineRow: React.FC<SortableLineRowProps> = ({ line, isDraft, qty, p
 
 const ActiveOrdersTab: React.FC = () => {
   const theme = useTheme();
+  const overdueDays = useUserSettingsStore((state) => state.settings.overdueOrderDays);
   const hasPermission = useAuthStore((state: any) => state.hasPermission);
   const user = useAuthStore((state: any) => state.user);
   const isSuperAdmin = user?.branchId === null || user?.branchId === undefined;
@@ -626,12 +629,20 @@ const ActiveOrdersTab: React.FC = () => {
               {filteredOrders.map((order) => {
                 const isExpanded = expandedOrderId === order.id;
                 const colSpan = isSuperAdmin ? 10 : 9;
+                const waitingDays = getWaitingDays(order);
+                const isOverdue = waitingDays !== null && waitingDays >= overdueDays;
                 return (
                   <React.Fragment key={order.id}>
                     <TableRow
                       hover
                       onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
-                      sx={{ cursor: "pointer" }}
+                      sx={{
+                        cursor: "pointer",
+                        ...(isOverdue && {
+                          backgroundColor: alpha(theme.palette.warning.main, 0.12),
+                          boxShadow: `inset 4px 0 0 ${theme.palette.warning.main}`,
+                        }),
+                      }}
                     >
                       <TableCell sx={{ py: 0.5 }}>
                         <IconButton size="small" tabIndex={-1}>
@@ -655,7 +666,10 @@ const ActiveOrdersTab: React.FC = () => {
                         </TableCell>
                       )}
                       <TableCell>
-                        <Chip label={statusMeta[order.status].label} color={statusMeta[order.status].color} size="small" />
+                        <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                          <Chip label={statusMeta[order.status].label} color={statusMeta[order.status].color} size="small" />
+                          {isOverdue && <Chip label={`seit ${waitingDays} Tagen`} color="warning" size="small" />}
+                        </Stack>
                       </TableCell>
                       <TableCell>{getOrderYear(order)}</TableCell>
                       <TableCell>{order.lines.length} Artikel</TableCell>
