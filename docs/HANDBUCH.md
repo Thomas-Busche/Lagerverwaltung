@@ -636,7 +636,7 @@ Jeder Benutzer kann eigene Präferenzen speichern (serverseitig, geräteübergre
 - **Theme:** Hell / Dunkel / Systemstandard + Farbschema
 - **Schnellbuchung-Workflow:** Vorgangsnummer zuerst oder direkt Artikel
 - **Duplikat-Warnung:** Ein/Aus + Zeitraum
-- **Dashboard-Widgets:** Sichtbarkeit und Reihenfolge. Das Widget **Überfällige Bestellungen** (ab v4.9) erscheint nur, wenn Bestellungen mit Status „Bestellt" seit mehr als 30 Tagen (ab Bestelldatum) noch nicht vollständig geliefert sind. Die Tage stellst du unter **Dashboard anpassen** beim Widget ein („Bestellung überfällig nach (Tagen)", 1 bis 365, gilt für dein eigenes Dashboard). Es zeigt Bestellnummer, Lieferant, Alter und die noch offene Menge, ein Klick führt zu den Bestellungen. Sichtbar für Benutzer mit dem Recht „Bestellungen ansehen", nur für das eigene Lager bzw. die eigene Niederlassung.
+- **Dashboard-Widgets:** Sichtbarkeit und Reihenfolge. Das Widget **Überfällige Bestellungen** (ab v4.9) erscheint nur, wenn Bestellungen mit Status „Bestellt" seit mehr als 30 Tagen (ab Bestelldatum) noch nicht vollständig geliefert sind. Die Tage stellst du unter **Dashboard anpassen** beim Widget ein („Bestellung überfällig nach (Tagen)", 1 bis 365, gilt für dein eigenes Dashboard). Es zeigt Bestellnummer, Lieferant, Alter und die noch offene Menge, ein Klick öffnet die Bestellungen direkt im Reiter „Offen". Sichtbar für Benutzer mit dem Recht „Bestellungen ansehen", nur für das eigene Lager bzw. die eigene Niederlassung.
 - **Schnellzugriff-Buttons:** Konfigurierbar für Desktop und Mobil
 
 Alle Einstellungen werden serverseitig gespeichert und sind nach Reload (F5) oder erneutem Anmelden sofort wiederhergestellt.

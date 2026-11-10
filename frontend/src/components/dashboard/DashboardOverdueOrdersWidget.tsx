@@ -6,6 +6,8 @@ import useAuthStore from "../../store/useAuthStore";
 import { isEffectivelyOffline } from "../../store/useNetworkStore";
 import { useUserSettingsStore } from "../../store/useUserSettingsStore";
 
+const OPEN_ORDERS_PATH = "/orders?tab=offen";
+
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString("de-DE");
 
 const DashboardOverdueOrdersWidget: React.FC = () => {
@@ -39,8 +41,8 @@ const DashboardOverdueOrdersWidget: React.FC = () => {
     <Alert
       severity="warning"
       action={
-        <Button color="inherit" size="small" onClick={() => navigate("/orders")}>
-          Zu den Bestellungen
+        <Button color="inherit" size="small" onClick={() => navigate(OPEN_ORDERS_PATH)}>
+          Zu den offenen Bestellungen
         </Button>
       }
     >
@@ -54,7 +56,7 @@ const DashboardOverdueOrdersWidget: React.FC = () => {
           <Box
             key={order.id}
             sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1, cursor: "pointer" }}
-            onClick={() => navigate("/orders")}
+            onClick={() => navigate(OPEN_ORDERS_PATH)}
           >
             <Typography variant="body2" sx={{ fontWeight: 600 }}>
               {order.orderNumber || "Ohne Bestellnummer"}

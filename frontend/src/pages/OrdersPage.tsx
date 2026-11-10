@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Box, Paper, Tab, Tabs, Typography, alpha, useTheme } from "@mui/material";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import PendingActionsIcon from "@mui/icons-material/PendingActions";
@@ -24,9 +25,18 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => {
   );
 };
 
+// Links like /orders?tab=offen open a specific tab (used by the dashboard reminder).
+const TAB_KEYS = ["vorschlaege", "offen", "wareneingang", "archiv"] as const;
+
+const tabIndexFromParam = (param: string | null): number => {
+  const index = TAB_KEYS.indexOf((param ?? "") as (typeof TAB_KEYS)[number]);
+  return index === -1 ? 0 : index;
+};
+
 const OrdersPage: React.FC = () => {
   const theme = useTheme();
-  const [tabValue, setTabValue] = useState(0);
+  const [searchParams] = useSearchParams();
+  const [tabValue, setTabValue] = useState(() => tabIndexFromParam(searchParams.get("tab")));
 
   return (
     <Box>

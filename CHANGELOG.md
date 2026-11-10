@@ -5,6 +5,13 @@ Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.0.0
 
 ---
 
+## [4.9.1] – 2026-11-10 · Dashboard-Hinweis öffnet direkt „Offen" bei den Bestellungen
+
+### Änderung
+- Ein Klick auf den Hinweis „Überfällige Bestellungen" (Zeile oder Button „Zu den offenen Bestellungen") öffnet die Bestellseite jetzt direkt im Reiter **Offen** statt bei den Vorschlägen. Dafür kann die Bestellseite einen Reiter per Link wählen (`/orders?tab=offen`; weitere Werte: `vorschlaege`, `wareneingang`, `archiv`). Ohne Angabe bleibt „Vorschläge" der Start.
+
+---
+
 ## [4.9.0] – 2026-11-09 · Lagerort im Wareneingang + überfällige Bestellungen im Dashboard
 
 ### Neue Funktion
