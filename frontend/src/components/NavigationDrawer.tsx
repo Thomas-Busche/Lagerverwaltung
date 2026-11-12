@@ -99,14 +99,15 @@ const NavigationDrawer: React.FC<NavigationDrawerProps> = ({ open, onClose, widt
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [inventoryOpen, setInventoryOpen] = React.useState(false);
 
-  if (!user) return null;
-
   // DESIGN-ENTSCHEIDUNG Berechtigungen:
   // Wenn 'permissions' definiert → Berechtigungs-Check (MANAGER hat via hasPermission() Vollzugriff).
   // Andernfalls Fallback auf Rollen-Check. Dies ist konsistentes Verhalten fuer alle Menu-Eintraege.
-  const isSuperAdmin = user.role === "MANAGER" && user.branchId === null;
+  // Alle Hooks muessen vor dem fruehen "return null" stehen, sonst wirft React Fehler #310,
+  // sobald der Benutzer nach dem ersten Rendern gesetzt wird (z.B. direkt nach dem Login).
+  const isSuperAdmin = user?.role === "MANAGER" && user?.branchId === null;
 
   const canAccess = (item: MenuItem) => {
+    if (!user) return false;
     if (item.superAdminOnly && !isSuperAdmin) return false;
     if (item.permissions && item.permissions.length > 0) {
       return hasPermission(item.permissions);
@@ -132,6 +133,8 @@ const NavigationDrawer: React.FC<NavigationDrawerProps> = ({ open, onClose, widt
       setInventoryOpen(true);
     }
   }, [settingsActive, inventoryActive]);
+
+  if (!user) return null;
 
   const handleNavigation = (path: string) => {
     navigate(path);
