@@ -1,8 +1,12 @@
-/** Reduces user-controlled text to a safe file name (no CR/LF, quotes, path chars). */
+/**
+ * Reduces user-controlled text to a safe file name (no CR/LF, quotes, path chars).
+ * Backslashes are replaced too: inside the quoted filename="..." parameter they act as
+ * escape characters and could break out of the quoted string.
+ */
 export function sanitizeFilename(name: string, fallback = 'download'): string {
   const cleaned = String(name ?? '')
     .replace(/[\u0000-\u001f\u007f]/g, '')
-    .replace(/[\/:*?"<>|;]/g, '_')
+    .replace(/[\\/:*?"<>|;]/g, '_')
     .replace(/^\.+/, '')
     .trim()
     .slice(0, 150);

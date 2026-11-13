@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import * as bcrypt from "bcrypt";
 import { In, Repository } from "typeorm";
@@ -58,7 +58,8 @@ export class UsersService {
   async create(dto: CreateUserDto): Promise<User> {
     const exists = await this.repository.findOne({ where: { username: dto.username } });
     if (exists) {
-      throw new Error('Benutzername bereits vergeben');
+      // HttpException so the client gets 409 with the message instead of a generic 500.
+      throw new ConflictException('Benutzername bereits vergeben');
     }
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const locations = dto.locationIds?.length
