@@ -137,6 +137,9 @@ const QuickBookingPage: React.FC = () => {
   useEffect(() => { duplicateCheckEnabledRef.current = duplicateCheckEnabled; }, [duplicateCheckEnabled]);
   const duplicateCheckMonthsRef = useRef(duplicateCheckMonths);
   useEffect(() => { duplicateCheckMonthsRef.current = duplicateCheckMonths; }, [duplicateCheckMonths]);
+  // Read in socket/scanner callbacks that would otherwise capture a stale workflow setting
+  const vorgangsnummerFirstRef = useRef(vorgangsnummerFirst);
+  useEffect(() => { vorgangsnummerFirstRef.current = vorgangsnummerFirst; }, [vorgangsnummerFirst]);
   // Socket-Ref für Echtzeit-Sync
   const socketRef = useRef<Socket | null>(null);
   // Wenn true, kommt die nächste Listenänderung vom Remote → nicht zurücksenden
@@ -207,13 +210,7 @@ const QuickBookingPage: React.FC = () => {
       setBookingList([]);
       setCurrentItem(null);
       setReference("");
-      setTimeout(() => {
-        const refInput = referenceRef.current;
-        if (refInput) {
-          refInput.value = "";
-          refInput.focus();
-        }
-      }, 80);
+      focusAfterBooking();
     });
 
     return () => {
@@ -239,6 +236,20 @@ const QuickBookingPage: React.FC = () => {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       barcodeWrapperRef.current?.querySelector<HTMLInputElement>("input")?.focus();
     }));
+  };
+
+  // After a completed booking the next step depends on the workflow:
+  // reference-first → scan the next Vorgangsnummer, otherwise → scan the next item.
+  const focusAfterBooking = () => {
+    setTimeout(() => {
+      const refInput = referenceRef.current;
+      if (refInput) refInput.value = "";
+      if (vorgangsnummerFirstRef.current) {
+        refInput?.focus();
+      } else {
+        refocusBarcode();
+      }
+    }, 80);
   };
 
   const showSuccess = (msg: string) => {
@@ -431,7 +442,7 @@ const QuickBookingPage: React.FC = () => {
       } else {
         // Im Sofort-Modus sind Artikel bereits gebucht → nur Vorgangsnummer zurücksetzen
         setReference("");
-        setTimeout(() => { referenceRef.current?.focus(); }, 80);
+        focusAfterBooking();
         playSuccess();
       }
       return;
@@ -548,12 +559,7 @@ const QuickBookingPage: React.FC = () => {
       setCurrentItem(null);
       setDuplicateWarnings([]);
       setReference("");
-      setTimeout(() => {
-        if (referenceRef.current) {
-          referenceRef.current.value = "";
-          referenceRef.current.focus();
-        }
-      }, 80);
+      focusAfterBooking();
     } else {
       showError(
         failedMessages.length === 1
