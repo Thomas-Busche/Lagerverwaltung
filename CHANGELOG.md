@@ -11,6 +11,9 @@ Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.0.0
 - Ein Klick auf den Hinweis „Überfällige Bestellungen" (Zeile oder Button „Zu den offenen Bestellungen") öffnet die Bestellseite jetzt direkt im Reiter **Offen** statt bei den Vorschlägen. Dafür kann die Bestellseite einen Reiter per Link wählen (`/orders?tab=offen`; weitere Werte: `vorschlaege`, `wareneingang`, `archiv`). Ohne Angabe bleibt „Vorschläge" der Start.
 - Im Reiter **Offen** werden überfällige Bestellungen jetzt hervorgehoben: gelb hinterlegt, farbiger Rand links und ein Chip „seit X Tagen" neben dem Status. Überfällig heißt wie im Dashboard: Status „Bestellt", noch Positionen offen und älter als die eingestellte Schwelle (Standard 30 Tage, unter „Dashboard anpassen" änderbar).
 
+### Fehlerbehebung
+- Absturz „Ups! Etwas ist schiefgelaufen" mit React-Fehler #310 behoben. Die Seitenleiste (Navigationsmenü) rief Teile ihrer Logik erst nach einer Prüfung auf den angemeldeten Benutzer auf; wurde der Benutzer nach dem ersten Anzeigen gesetzt (z. B. direkt nach dem Login oder nach dem Wiederherstellen der Sitzung), brach React ab.
+
 ---
 
 ## [4.9.0] – 2026-11-09 · Lagerort im Wareneingang + überfällige Bestellungen im Dashboard
